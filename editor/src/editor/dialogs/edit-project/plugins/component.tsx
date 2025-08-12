@@ -1,4 +1,4 @@
-import { join, dirname } from "path/posix";
+import { dirname, join, relative } from "path/posix";
 
 import { Grid } from "react-loader-spinner";
 import { Component, ReactNode } from "react";
@@ -137,6 +137,8 @@ export class EditorEditProjectPluginComponent extends Component<IEditorEditProje
 			this.props.editor.setState({
 				plugins: [...this.props.editor.state.plugins, name],
 			});
+
+			this.props.editor.layout.console.log(`Successfully added npm plugin "${name}"`);
 		} catch (e) {
 			this.props.editor.layout.console.error("Invalid plugin.");
 			if (e.message) {
@@ -148,16 +150,28 @@ export class EditorEditProjectPluginComponent extends Component<IEditorEditProje
 	}
 
 	private _handleAddPluginFromLocalDisk(): void {
+		if (!this.props.editor.state.projectPath) {
+			return;
+		}
+
 		const directory = openSingleFolderDialog("Select plugin's directory.");
+		if (!directory) {
+			return;
+		}
 
 		try {
 			require(join(directory, "package.json"));
 			const result = require(directory);
 			result.main(this.props.editor);
 
+			const projectDir = dirname(this.props.editor.state.projectPath);
+			const relativePath = relative(projectDir, directory);
+
 			this.props.editor.setState({
-				plugins: [...this.props.editor.state.plugins, directory],
+				plugins: [...this.props.editor.state.plugins, relativePath],
 			});
+
+			this.props.editor.layout.console.log(`Successfully added local plugin from "${relativePath}"`);
 		} catch (e) {
 			this.props.editor.layout.console.error("Invalid plugin.");
 			if (e.message) {

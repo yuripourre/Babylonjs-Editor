@@ -85,13 +85,18 @@ export async function loadProject(editor: Editor, path: string): Promise<void> {
 }
 
 export async function loadProjectPlugins(editor: Editor, path: string, project: IEditorProject) {
+	const projectDir = dirname(path);
+
 	for (const plugin of project.plugins) {
 		try {
-			const isLocalPlugin = await pathExists(plugin.nameOrPath);
+			// Check if this is a local plugin by looking for a package.json in the plugin directory
+			const pluginPath = join(projectDir, plugin.nameOrPath);
+			const isLocalPlugin = await pathExists(join(pluginPath, "package.json"));
 
-			let requireId = plugin.nameOrPath;
-			if (!isLocalPlugin) {
-				const projectDir = dirname(path);
+			let requireId: string;
+			if (isLocalPlugin) {
+				requireId = pluginPath;
+			} else {
 				requireId = join(projectDir, "node_modules", plugin.nameOrPath);
 			}
 

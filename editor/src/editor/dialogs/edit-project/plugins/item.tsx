@@ -36,8 +36,22 @@ export function EditorEditProjectPluginItemComponent(props: IEditorEditProjectPl
 
 	useEffect(() => {
 		requireAndSetupPlugin();
-		pathExists(props.pathOrName).then((exists) => setIsFromNpm(!exists));
+		checkPluginType();
 	}, []);
+
+	async function checkPluginType() {
+		if (!projectConfiguration.path) {
+			return;
+		}
+
+		const projectDir = dirname(projectConfiguration.path);
+		const pluginPath = join(projectDir, props.pathOrName);
+		const hasPackageJson = await pathExists(join(pluginPath, "package.json"));
+
+		// If it has a package.json in the plugin directory, it's a local plugin
+		// Otherwise, it's an npm plugin
+		setIsFromNpm(!hasPackageJson);
+	}
 
 	async function requireAndSetupPlugin() {
 		const requireId = await getRequireId();
@@ -80,7 +94,7 @@ export function EditorEditProjectPluginItemComponent(props: IEditorEditProjectPl
 	}
 
 	async function handleUpdate() {
-		if (!projectConfiguration.path) {
+		if (!projectConfiguration.path || !isFromNpm) {
 			return;
 		}
 
@@ -143,11 +157,14 @@ export function EditorEditProjectPluginItemComponent(props: IEditorEditProjectPl
 			return null;
 		}
 
-		const isLocalPlugin = await pathExists(props.pathOrName);
+		const projectDir = dirname(projectConfiguration.path);
+		const pluginPath = join(projectDir, props.pathOrName);
+		const isLocalPlugin = await pathExists(join(pluginPath, "package.json"));
 
-		let requireId = props.pathOrName;
-		if (!isLocalPlugin) {
-			const projectDir = dirname(projectConfiguration.path);
+		let requireId: string;
+		if (isLocalPlugin) {
+			requireId = pluginPath;
+		} else {
 			requireId = join(projectDir, "node_modules", props.pathOrName);
 		}
 
