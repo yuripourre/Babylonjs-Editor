@@ -976,10 +976,6 @@ export class EditorPreview extends Component<IEditorPreviewProps, IEditorPreview
 	 * @param gizmo defines the type of gizmo to activate.
 	 */
 	public setActiveGizmo(gizmo: "position" | "rotation" | "scaling" | "none"): void {
-		if (this.state.activeGizmo === gizmo) {
-			gizmo = "none";
-		}
-
 		this.gizmo.setGizmoType(gizmo);
 		this.setState({ activeGizmo: gizmo });
 	}
