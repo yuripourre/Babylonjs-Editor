@@ -78,6 +78,14 @@
 								"component": "console",
 								"enableClose": false,
 								"enableRenderOnDemand": false
+							},
+							{
+								"type": "tab",
+								"id": "mixed-reality",
+								"name": "Mixed Reality",
+								"component": "mixed-reality",
+								"enableClose": false,
+								"enableRenderOnDemand": false
 							}
 						]
 					}
