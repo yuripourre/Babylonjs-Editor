@@ -64,7 +64,7 @@ export class EditorLayout extends Component<IEditorLayoutProps> {
 		"mixed-reality": <MixedReality editor={this.props.editor} />,
 	};
 
-	private _layoutVersion: string = "5.0.0-alpha.2";
+	private _layoutVersion: string = "5.0.0-alpha.3";
 
 	public constructor(props: IEditorLayoutProps) {
 		super(props);

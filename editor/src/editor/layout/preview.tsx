@@ -130,6 +130,11 @@ export interface IEditorPreviewState {
 	statsValues?: StatsValuesType;
 
 	playSceneLoadingProgress: number;
+
+	/**
+	 * Defines whether or not VR simulation is enabled.
+	 */
+	isVrSimulationEnabled: boolean;
 }
 
 export class EditorPreview extends Component<IEditorPreviewProps, IEditorPreviewState> {
@@ -184,6 +189,7 @@ export class EditorPreview extends Component<IEditorPreviewProps, IEditorPreview
 			showStatsValues: false,
 
 			playSceneLoadingProgress: 0,
+			isVrSimulationEnabled: false,
 		};
 
 		ipcRenderer.on("gizmo:position", () => this.setActiveGizmo("position"));
@@ -317,6 +323,27 @@ export class EditorPreview extends Component<IEditorPreviewProps, IEditorPreview
 			default:
 				this.engine?.resize();
 				break;
+		}
+	}
+
+	/**
+	 * Sets whether or not VR simulation is enabled.
+	 * @param enabled defines whether or not VR simulation is enabled.
+	 */
+	public setVrSimulationEnabled(enabled: boolean): void {
+		// Update the state
+		this.setState({ isVrSimulationEnabled: enabled });
+		
+		// If enabled, make sure the WebXR experience is properly initialized
+		if (enabled && this.scene) {
+			// Force a resize to ensure the WebXR experience is properly sized
+			this.engine?.resize();
+			
+			// Add a delay to ensure the WebXR button is properly initialized
+			setTimeout(() => {
+				// Force a render to update the WebXR experience
+				this.scene?.render();
+			}, 500);
 		}
 	}
 
