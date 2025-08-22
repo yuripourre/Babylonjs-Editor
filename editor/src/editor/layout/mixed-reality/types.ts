@@ -19,6 +19,16 @@ export interface IMixedRealityState {
      * Defines whether or not VR simulation is enabled.
      */
     isVrEnabled: boolean;
+    
+    /**
+     * Defines whether the canvas is ready and rendering.
+     */
+    canvasReady?: boolean;
+    
+    /**
+     * Defines any error that occurred while initializing the canvas.
+     */
+    canvasError?: string;
 }
 
 /**

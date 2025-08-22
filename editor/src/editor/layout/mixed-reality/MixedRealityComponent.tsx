@@ -42,6 +42,8 @@ export class MixedRealityComponent extends React.Component<IMixedRealityProps, I
 
         this.state = {
             isVrEnabled: false,
+            canvasReady: false,
+            canvasError: undefined
         };
     }
 
@@ -50,27 +52,51 @@ export class MixedRealityComponent extends React.Component<IMixedRealityProps, I
      */
     public render(): React.ReactNode {
         return (
-            <div className="flex flex-col w-full h-full text-foreground">
+            <div className="flex flex-col w-full h-full text-foreground" style={{ minHeight: '400px' }}>
                 {/* Header with VR simulation toggle */}
                 <div className="flex items-center justify-between w-full h-12 px-4 bg-muted/50 border-b border-border">
                     <h3 className="text-sm font-medium">Mixed Reality Tools</h3>
-                    <button
-                        className={`px-4 py-2 rounded-md text-sm font-medium transition-colors ${
-                            this.state.isVrEnabled
-                                ? "bg-red-500 hover:bg-red-600 text-white"
-                                : "bg-green-500 hover:bg-green-600 text-white"
-                        }`}
-                        onClick={() => this._handleEnableVrSimulation()}
-                    >
-                        {this.state.isVrEnabled ? "Disable VR Simulation" : "Enable VR Simulation"}
-                    </button>
+                    <div className="flex items-center gap-2">
+                        <span className="text-xs text-muted-foreground">
+                            {this.state.canvasReady ? "Canvas ready" : "Initializing canvas..."}
+                        </span>
+                        <button
+                            className={`px-4 py-2 rounded-md text-sm font-medium transition-colors ${
+                                this.state.isVrEnabled
+                                    ? "bg-red-500 hover:bg-red-600 text-white"
+                                    : "bg-green-500 hover:bg-green-600 text-white"
+                            }`}
+                            onClick={() => this._handleEnableVrSimulation()}
+                        >
+                            {this.state.isVrEnabled ? "Disable VR Simulation" : "Enable VR Simulation"}
+                        </button>
+                    </div>
                 </div>
 
                 {/* VR Cube Canvas */}
-                <div className="flex-1 relative">
+                <div 
+                    className="flex-1 relative" 
+                    id="mixed-reality-container"
+                    style={{ 
+                        width: '100%', 
+                        height: 'calc(100% - 48px)', 
+                        minHeight: '300px',
+                        overflow: 'hidden',
+                        border: '1px solid #333',
+                        background: '#111'
+                    }}
+                >
                     <canvas
                         id="mixed-reality-canvas"
                         className="w-full h-full touch-none"
+                        style={{ 
+                            display: 'block', 
+                            width: '100%', 
+                            height: '100%', 
+                            position: 'absolute', 
+                            top: 0, 
+                            left: 0 
+                        }}
                         onContextMenu={(e) => e.preventDefault()}
                     />
                     
@@ -87,6 +113,16 @@ export class MixedRealityComponent extends React.Component<IMixedRealityProps, I
                         </div>
                     )}
 
+                    {/* Error Display */}
+                    {this.state.canvasError && (
+                        <div className="absolute bottom-4 left-4 right-4 p-3 bg-red-500/90 rounded-lg border border-red-600">
+                            <div className="flex items-center gap-2">
+                                <div className="w-2 h-2 bg-white rounded-full animate-pulse" />
+                                <span className="text-xs font-medium text-white">Error: {this.state.canvasError}</span>
+                            </div>
+                        </div>
+                    )}
+                    
                     {/* VR Active Indicator */}
                     {this.state.isVrEnabled && (
                         <div className="absolute top-4 right-4 p-3 bg-green-500/90 rounded-lg border border-green-600">
@@ -105,46 +141,151 @@ export class MixedRealityComponent extends React.Component<IMixedRealityProps, I
      * Called on the component did mount.
      */
     public componentDidMount(): void {
-        const canvas = document.getElementById("mixed-reality-canvas") as HTMLCanvasElement;
+        // Get the canvas element or wait for it to be available
+        let canvas = document.getElementById("mixed-reality-canvas") as HTMLCanvasElement;
         
-        // Create a new engine for this canvas
-        this._engine = new Engine(canvas, true, { 
-            preserveDrawingBuffer: true, 
-            stencil: true,
-            antialias: true,
-            adaptToDeviceRatio: true,
-            useHighPrecisionMatrix: true,
-        });
+        // If canvas is not available, wait for it to be rendered
+        if (!canvas) {
+            console.warn("Mixed Reality canvas not found on initial mount, waiting for it to be available...");
+            setTimeout(() => this._initializeEngine(), 100);
+            return;
+        }
         
-        this.scene = new Scene(this._engine);
-        this.scene.clearColor.set(0.1, 0.1, 0.1, 1);
-
-        const camera = new ArcRotateCamera("camera", -Math.PI / 2, Math.PI / 2.5, 3, new Vector3(0, 0, 0), this.scene);
-        camera.attachControl(canvas, true);
-
-        new HemisphericLight("light", new Vector3(0, 1, 0), this.scene);
-
-        // Create utility layer for gizmos
-        this._utilityLayer = new UtilityLayerRenderer(this.scene);
-
-        // Create grid for better contrast and reference
-        Grid.create({ scene: this.scene });
-
-        // Create VR headset and indicator
-        this._vrHeadset = new VRHeadset({
-            scene: this.scene,
-            isVrEnabled: this.state.isVrEnabled
-        });
-
-        // Register render loop for this specific scene
-        this._engine.runRenderLoop(() => {
-            if (this.scene) {
-                this.scene.render();
+        this._initializeEngine();
+    }
+    
+    /**
+     * Initializes the Babylon.js engine and scene.
+     */
+    private _initializeEngine(): void {
+        try {
+            const canvas = document.getElementById("mixed-reality-canvas") as HTMLCanvasElement;
+            
+            if (!canvas) {
+                console.error("Failed to find mixed-reality-canvas element even after delay");
+                this.setState({ canvasError: "Canvas element not found" });
+                
+                // Try again after a longer delay
+                setTimeout(() => this._initializeEngine(), 500);
+                return;
             }
-        });
+            
+            // Log canvas parent and dimensions for debugging
+            console.log("Canvas parent:", canvas.parentElement);
+            console.log("Canvas container:", document.getElementById("mixed-reality-container"));
+            
+            // Get actual dimensions
+            const containerDiv = document.getElementById("mixed-reality-container");
+            const containerWidth = containerDiv ? containerDiv.clientWidth : window.innerWidth;
+            const containerHeight = containerDiv ? containerDiv.clientHeight : window.innerHeight;
+            
+            console.log("Container dimensions:", containerWidth, "x", containerHeight);
+            
+            // Make sure canvas dimensions are properly set
+            canvas.width = containerWidth || 800;
+            canvas.height = containerHeight || 600;
+            
+            console.log("Set canvas dimensions to:", canvas.width, "x", canvas.height);
+            
+            // Create a new engine for this canvas
+            this._engine = new Engine(canvas, true, { 
+                preserveDrawingBuffer: true, 
+                stencil: true,
+                antialias: true,
+                adaptToDeviceRatio: true,
+                useHighPrecisionMatrix: true,
+            });
+            
+            // Update state to indicate canvas is being initialized
+            this.setState({ canvasError: undefined });
+        } catch (error) {
+            console.error("Error initializing Babylon engine:", error);
+            this.setState({ 
+                canvasError: `Initialization error: ${error.message || "Unknown error"}` 
+            });
+        }
+        
+        try {
+            // Ensure engine was created successfully
+            if (!this._engine) {
+                console.error("Cannot initialize scene - engine is null");
+                this.setState({ 
+                    canvasError: "Failed to create rendering engine" 
+                });
+                return;
+            }
+            
+            // Create and configure the scene
+            this.scene = new Scene(this._engine);
+            this.scene.clearColor.set(0.1, 0.1, 0.1, 1);
 
-        // Handle window resize
-        window.addEventListener("resize", this._handleResize);
+            // Get canvas again for attaching controls
+            const canvas = document.getElementById("mixed-reality-canvas") as HTMLCanvasElement;
+            if (!canvas) {
+                console.error("Canvas disappeared during initialization");
+                this.setState({ canvasError: "Canvas element lost during initialization" });
+                return;
+            }
+
+            // Create camera
+            const camera = new ArcRotateCamera("camera", -Math.PI / 2, Math.PI / 2.5, 3, new Vector3(0, 0, 0), this.scene);
+            camera.attachControl(canvas, true);
+
+            // Add light
+            new HemisphericLight("light", new Vector3(0, 1, 0), this.scene);
+
+            // Create utility layer for gizmos with error handling
+            try {
+                this._utilityLayer = new UtilityLayerRenderer(this.scene);
+            } catch (error) {
+                console.warn("Error creating utility layer, continuing without it:", error);
+            }
+
+            // Create grid for better contrast and reference
+            try {
+                Grid.create({ scene: this.scene });
+            } catch (error) {
+                console.warn("Error creating grid, continuing without it:", error);
+            }
+
+            // Create VR headset and indicator with error handling
+            try {
+                this._vrHeadset = new VRHeadset({
+                    scene: this.scene,
+                    isVrEnabled: this.state.isVrEnabled
+                });
+            } catch (error) {
+                console.warn("Error creating VR headset, continuing without it:", error);
+                this.setState({ canvasError: "Failed to create VR headset" });
+            }
+
+            // Register render loop for this specific scene
+            this._engine.runRenderLoop(() => {
+                if (this.scene) {
+                    try {
+                        this.scene.render();
+                    } catch (e) {
+                        console.error("Error in render loop:", e);
+                    }
+                }
+            });
+
+            // Handle window resize
+            window.addEventListener("resize", this._handleResize);
+            
+            // Force an initial resize to ensure canvas is properly sized
+            setTimeout(() => this._handleResize(), 0);
+            
+            // Mark canvas as ready
+            this.setState({ canvasReady: true, canvasError: undefined });
+            
+        } catch (error) {
+            console.error("Failed to initialize scene:", error);
+            this.setState({ 
+                canvasReady: false, 
+                canvasError: `Scene initialization error: ${error.message || "Unknown error"}` 
+            });
+        }
     }
 
     /**
@@ -241,7 +382,21 @@ export class MixedRealityComponent extends React.Component<IMixedRealityProps, I
      * Handles window resize events.
      */
     private _handleResize = (): void => {
-        this._engine?.resize();
+        if (!this._engine) {
+            return;
+        }
+        
+        const canvas = document.getElementById("mixed-reality-canvas") as HTMLCanvasElement;
+        if (canvas) {
+            // Explicitly set canvas dimensions before resizing
+            canvas.width = canvas.clientWidth;
+            canvas.height = canvas.clientHeight;
+            
+            // Log canvas size for debugging
+            console.log("Resizing mixed reality canvas to:", canvas.width, "x", canvas.height);
+        }
+        
+        this._engine.resize();
     };
 
     /**
