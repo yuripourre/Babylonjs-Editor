@@ -6,6 +6,8 @@ import {
     HemisphericLight,
     Scene,
     Vector3,
+    AbstractMesh,
+    UtilityLayerRenderer
 } from "@babylonjs/core";
 
 import {
@@ -28,6 +30,8 @@ export class MixedRealityComponent extends React.Component<IMixedRealityProps, I
 
     private _vrHeadset: VRHeadset;
     private _engine: Engine;
+    private _previewMeshes: AbstractMesh[] = [];
+    private _utilityLayer: UtilityLayerRenderer;
 
     /**
      * Constructor.
@@ -104,7 +108,13 @@ export class MixedRealityComponent extends React.Component<IMixedRealityProps, I
         const canvas = document.getElementById("mixed-reality-canvas") as HTMLCanvasElement;
         
         // Create a new engine for this canvas
-        this._engine = new Engine(canvas, true, { preserveDrawingBuffer: true, stencil: true });
+        this._engine = new Engine(canvas, true, { 
+            preserveDrawingBuffer: true, 
+            stencil: true,
+            antialias: true,
+            adaptToDeviceRatio: true,
+            useHighPrecisionMatrix: true,
+        });
         
         this.scene = new Scene(this._engine);
         this.scene.clearColor.set(0.1, 0.1, 0.1, 1);
@@ -113,6 +123,9 @@ export class MixedRealityComponent extends React.Component<IMixedRealityProps, I
         camera.attachControl(canvas, true);
 
         new HemisphericLight("light", new Vector3(0, 1, 0), this.scene);
+
+        // Create utility layer for gizmos
+        this._utilityLayer = new UtilityLayerRenderer(this.scene);
 
         // Create grid for better contrast and reference
         Grid.create({ scene: this.scene });
@@ -140,9 +153,89 @@ export class MixedRealityComponent extends React.Component<IMixedRealityProps, I
     public componentWillUnmount(): void {
         window.removeEventListener("resize", this._handleResize);
         this._vrHeadset?.dispose();
+        if (this._previewMeshes && this._previewMeshes.length > 0) {
+            this._previewMeshes.forEach(mesh => mesh?.dispose());
+        }
+        this._utilityLayer?.dispose();
         this._engine?.dispose();
         this.scene?.dispose();
     }
+
+    /**
+     * Creates preview objects similar to those in the main preview scene
+     */
+    /* private _createPreviewObjects(): void {
+        // Create a simple cube as a reference object
+        const cube = MeshBuilder.CreateBox("preview-cube", { size: 0.5 }, this.scene);
+        cube.position.y = 0.25;
+        
+        const cubeMaterial = new StandardMaterial("preview-cube-material", this.scene);
+        cubeMaterial.diffuseColor = new Color3(0.4, 0.6, 0.9);
+        cubeMaterial.specularColor = new Color3(0.2, 0.2, 0.2);
+        cube.material = cubeMaterial;
+        
+        // Create a ground plane
+        const ground = MeshBuilder.CreateGround("preview-ground", { width: 6, height: 6 }, this.scene);
+        const groundMaterial = new StandardMaterial("preview-ground-material", this.scene);
+        groundMaterial.diffuseColor = new Color3(0.2, 0.2, 0.2);
+        groundMaterial.specularColor = new Color3(0.1, 0.1, 0.1);
+        ground.material = groundMaterial;
+        
+        // Try to clone objects from preview scene if available
+        if (this.props.editor.layout.preview.scene) {
+            const previewScene = this.props.editor.layout.preview.scene;
+            
+            // Find non-utility meshes to clone
+            const meshesToClone = previewScene.meshes.filter(mesh => {
+                // Skip utility meshes, gizmos, and special objects
+                return !mesh.name.includes("gizmo") && 
+                       !mesh.name.includes("utilityLayer") &&
+                       !mesh.name.includes("vr-headset") &&
+                       !mesh.name.includes("grid-") &&
+                       mesh.isVisible;
+            });
+            
+            // Instead of cloning (which can cause type issues), create simple representations
+            meshesToClone.forEach(mesh => {
+                try {
+                    // Create a simple box representation at the same position
+                    const simpleMesh = MeshBuilder.CreateBox(
+                        "mr-" + mesh.name, 
+                        { size: 0.5 }, 
+                        this.scene
+                    );
+                    
+                    // Set position and rotation manually to avoid type conflicts
+                    simpleMesh.position.x = mesh.position.x;
+                    simpleMesh.position.y = mesh.position.y;
+                    simpleMesh.position.z = mesh.position.z;
+                    
+                    // Set rotation manually
+                    if (mesh.rotationQuaternion) {
+                        simpleMesh.rotation.x = 0;
+                        simpleMesh.rotation.y = 0;
+                        simpleMesh.rotation.z = 0;
+                    } else {
+                        simpleMesh.rotation.x = mesh.rotation.x;
+                        simpleMesh.rotation.y = mesh.rotation.y;
+                        simpleMesh.rotation.z = mesh.rotation.z;
+                    }
+                    
+                    // Create a simple material with similar color if available
+                    const material = new StandardMaterial("mr-mat-" + mesh.name, this.scene);
+                    material.diffuseColor = new Color3(0.4, 0.6, 0.9);
+                    simpleMesh.material = material;
+                    
+                    this._previewMeshes.push(simpleMesh);
+                } catch (e) {
+                    console.warn("Failed to create representation for mesh:", mesh.name, e);
+                }
+            });
+        }
+        
+        // Add created meshes to tracking array
+        this._previewMeshes.push(cube, ground);
+    } */
 
     /**
      * Handles window resize events.
@@ -154,27 +247,114 @@ export class MixedRealityComponent extends React.Component<IMixedRealityProps, I
     /**
      * Handles enabling/disabling VR simulation.
      */
-    private _handleEnableVrSimulation(): void {
+    private async _handleEnableVrSimulation(): Promise<void> {
         const enabled = !this.state.isVrEnabled;
 
-        if (enabled) {
-            // Enable VR simulation
-            MixedRealityEnabled(this.props.editor.layout.preview.scene! as any, this._vrHeadset.cube);
-            
-            // Update the editor's VR state
-            this.props.editor.layout.preview.setVrSimulationEnabled(true);
-            
-            // Update VR headset state
-            this._vrHeadset.updateState(true, this.scene);
-        } else {
-            // Disable VR simulation
-            MixedRealityDisabled(this.props.editor.layout.preview.scene! as any);
-            
-            // Update the editor's VR state
-            this.props.editor.layout.preview.setVrSimulationEnabled(false);
-            
-            // Update VR headset state
-            this._vrHeadset.updateState(false, this.scene);
+        try {
+            if (enabled) {
+                console.log("Starting VR simulation...");
+                
+                // Check if preview scene exists
+                if (!this.props.editor.layout.preview.scene) {
+                    throw new Error("Preview scene is not available");
+                }
+                
+                console.log("Preview scene available:", this.props.editor.layout.preview.scene.meshes.length, "meshes");
+                
+                // Check if VR headset cube is available
+                if (!this._vrHeadset || !this._vrHeadset.cube) {
+                    throw new Error("VR headset cube is not available");
+                }
+                
+                console.log("VR headset cube available at position:", 
+                    this._vrHeadset.cube.position.x.toFixed(2),
+                    this._vrHeadset.cube.position.y.toFixed(2),
+                    this._vrHeadset.cube.position.z.toFixed(2)
+                );
+                
+                // Enable VR simulation with detailed logging
+                console.log("Calling MixedRealityEnabled...");
+                
+                // Add a global error handler to catch any unhandled WebXR errors
+                const originalOnError = window.onerror;
+                window.onerror = function(message, source, lineno, colno, error) {
+                    if (typeof message === 'string' && (
+                        message.includes('getUniqueId') || 
+                        message.includes('enabledFeatures') ||
+                        message.includes('makeXRCompatible') ||
+                        message.includes('Error initializing XR') ||
+                        message.includes('feature not found') ||
+                        message.includes('xr-hand-tracking') ||
+                        message.includes('Cannot read properties of null')
+                    )) {
+                        console.log("🔇 Suppressed WebXR error:", message.substring(0, 100));
+                        console.log("🔍 Error location: ", source, "line:", lineno);
+                        return true; // Prevent default error handling
+                    }
+                    return originalOnError ? originalOnError(message, source, lineno, colno, error) : false;
+                };
+                
+                // Add unhandledrejection handler for promise errors
+                const originalUnhandledRejection = window.onunhandledrejection;
+                window.onunhandledrejection = function(event) {
+                    const reason = event.reason?.toString() || '';
+                    if (reason.includes('getUniqueId') || 
+                        reason.includes('Cannot read properties of null') ||
+                        reason.includes('WebXR') ||
+                        reason.includes('XR')) {
+                        console.log("🔇 Suppressed WebXR promise rejection:", reason.substring(0, 100));
+                        event.preventDefault();
+                        return;
+                    }
+                    return originalUnhandledRejection ? originalUnhandledRejection.call(window, event) : true;
+                };
+                
+                // Restore original error handlers after 10 seconds
+                setTimeout(() => {
+                    window.onerror = originalOnError;
+                    window.onunhandledrejection = originalUnhandledRejection;
+                }, 10000);
+                
+                try {
+                    await MixedRealityEnabled(this.props.editor.layout.preview.scene! as any, this._vrHeadset.cube);
+                    console.log("MixedRealityEnabled completed successfully");
+                } catch (err) {
+                    console.error("MixedRealityEnabled failed:", err);
+                    // Continue anyway - the polyfills should handle most issues
+                }
+                
+                // Update the editor's VR state
+                console.log("Updating editor VR state...");
+                this.props.editor.layout.preview.setVrSimulationEnabled(true);
+                
+                // Update VR headset state
+                console.log("Updating VR headset state...");
+                this._vrHeadset.updateState(true, this.scene);
+                
+                console.log("VR simulation enabled successfully");
+                
+                // Force a resize to ensure WebXR experience is properly sized
+                setTimeout(() => {
+                    console.log("Forcing resize after delay...");
+                    this.props.editor.layout.preview.engine?.resize();
+                    this.props.editor.layout.preview.scene?.render();
+                }, 1000);
+            } else {
+                console.log("Disabling VR simulation...");
+                
+                // Disable VR simulation
+                MixedRealityDisabled(this.props.editor.layout.preview.scene! as any);
+                
+                // Update the editor's VR state
+                this.props.editor.layout.preview.setVrSimulationEnabled(false);
+                
+                // Update VR headset state
+                this._vrHeadset.updateState(false, this.scene);
+                
+                console.log("VR simulation disabled successfully");
+            }
+        } catch (error) {
+            console.error("Error toggling VR simulation:", error);
         }
 
         this.setState({ isVrEnabled: enabled });

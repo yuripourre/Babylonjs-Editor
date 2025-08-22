@@ -80,8 +80,25 @@ export class VRHeadset {
     public updateState(isEnabled: boolean, scene: any): void {
         this.indicator.setEnabled(isEnabled);
         
+        // Make sure the cube has proper position for VR camera alignment
         if (isEnabled) {
+            // Ensure the cube is at a good height for VR camera
+            if (this.cube.position.y < 1.4) {
+                this.cube.position.y = 1.6; // Standard VR camera height
+            }
+            
+            // Update indicator position to match cube
+            this.indicator.position.x = this.cube.position.x;
+            this.indicator.position.z = this.cube.position.z;
+            
+            // Start animation
             this._animateIndicator(scene);
+            
+            console.log("VR headset position updated:", 
+                this.cube.position.x.toFixed(2),
+                this.cube.position.y.toFixed(2),
+                this.cube.position.z.toFixed(2)
+            );
         }
     }
 
@@ -91,37 +108,44 @@ export class VRHeadset {
     private _animateIndicator(scene: any): void {
         if (!this.indicator) return;
 
-        // Create a simple floating animation
-        const animation = new Animation(
-            "vr-indicator-float", 
-            "position.y", 
-            30, 
-            Animation.ANIMATIONTYPE_FLOAT, 
-            Animation.ANIMATIONLOOPMODE_CYCLE
-        );
-        
-        const keyFrames: { frame: number; value: number }[] = [];
-        keyFrames.push({
-            frame: 0,
-            value: this.cube.position.y + 0.15
-        });
-        keyFrames.push({
-            frame: 30,
-            value: this.cube.position.y + 0.2
-        });
-        keyFrames.push({
-            frame: 60,
-            value: this.cube.position.y + 0.15
-        });
-        
-        animation.setKeys(keyFrames);
-        
-        const easingFunction = new CircleEase();
-        easingFunction.setEasingMode(EasingFunction.EASINGMODE_EASEINOUT);
-        animation.setEasingFunction(easingFunction);
-        
-        this.indicator.animations = [animation];
-        scene.beginAnimation(this.indicator, 0, 60, true);
+        try {
+            // Update indicator base position to match cube
+            this.indicator.position.y = this.cube.position.y + 0.15;
+            
+            // Create a simple floating animation
+            const animation = new Animation(
+                "vr-indicator-float", 
+                "position.y", 
+                30, 
+                Animation.ANIMATIONTYPE_FLOAT, 
+                Animation.ANIMATIONLOOPMODE_CYCLE
+            );
+            
+            const keyFrames: { frame: number; value: number }[] = [];
+            keyFrames.push({
+                frame: 0,
+                value: this.cube.position.y + 0.15
+            });
+            keyFrames.push({
+                frame: 30,
+                value: this.cube.position.y + 0.2
+            });
+            keyFrames.push({
+                frame: 60,
+                value: this.cube.position.y + 0.15
+            });
+            
+            animation.setKeys(keyFrames);
+            
+            const easingFunction = new CircleEase();
+            easingFunction.setEasingMode(EasingFunction.EASINGMODE_EASEINOUT);
+            animation.setEasingFunction(easingFunction);
+            
+            this.indicator.animations = [animation];
+            scene.beginAnimation(this.indicator, 0, 60, true);
+        } catch (error) {
+            console.warn("Error animating VR indicator:", error);
+        }
     }
 
     /**
