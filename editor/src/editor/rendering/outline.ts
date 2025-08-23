@@ -1,12 +1,20 @@
-import { AbstractMesh, Color3, Mesh, Scene, StandardMaterial, Vector3, Material } from "babylonjs";
+import { 
+	AbstractMesh, 
+	Color3, 
+	Mesh, 
+	Scene, 
+	Vector3, 
+	StandardMaterial, 
+	VertexData
+} from "babylonjs";
 
 import { isMesh, isInstancedMesh } from "../../tools/guards/nodes";
 
 export class Outline {
-	private _outlineMeshes: Mesh[] = [];
-	private _outlineMaterial: StandardMaterial;
+	private _scene: Scene;
 	private _currentSelectedMesh: AbstractMesh | null = null;
-	private _originalMaterials: Map<string, Material | null> = new Map();
+	private _outlineMeshes: Mesh[] = [];
+	private _outlineMaterials: StandardMaterial[] = [];
 	private _originalRenderingGroups: Map<string, number> = new Map();
 
 	/**
@@ -15,30 +23,26 @@ export class Outline {
 	public outlineColor: Color3 = Color3.FromHexString("#446BAA");
 
 	/**
-	 * The outline thickness (scale factor).
+	 * The outline scale factor.
 	 */
-	public outlineThickness: number = 1.03; // 3% larger than original
+	public outlineScale: number = 1.05;
 
 	/**
-	 * The rendering group ID for outline meshes.
+	 * The rendering group ID for original meshes (higher than outline).
 	 */
-	public renderingGroupId: number = 0; // Same group as original meshes
+	public originalRenderingGroupId: number = 1;
+
+	/**
+	 * The rendering group ID for outline meshes (lower than original).
+	 */
+	public outlineRenderingGroupId: number = 0;
 
 	constructor(scene: Scene) {
-		// Create outline material - solid color
-		this._outlineMaterial = new StandardMaterial(`outlineMaterial_${Date.now()}`, scene);
-		this._outlineMaterial.diffuseColor = this.outlineColor;
-		this._outlineMaterial.emissiveColor = this.outlineColor;
-		this._outlineMaterial.disableLighting = true;
-		this._outlineMaterial.wireframe = false;
-		this._outlineMaterial.backFaceCulling = false;
-		this._outlineMaterial.zOffset = -0.5; // Negative zOffset to ensure it renders behind
-		this._outlineMaterial.alpha = 1.0;
-		this._outlineMaterial.freeze();
+		this._scene = scene;
 	}
 
 	/**
-	 * Sets the outline for the specified mesh using the edge detection technique.
+	 * Sets the outline for the specified mesh using a vertex-based approach.
 	 * @param mesh The mesh to outline, or null to clear the outline
 	 */
 	public setOutlineMesh(mesh: AbstractMesh | null): void {
@@ -49,7 +53,7 @@ export class Outline {
 
 		// Set new outline
 		if (mesh && isMesh(mesh)) {
-			console.log('Creating outline for mesh:', mesh.name);
+			console.log('Creating vertex-based outline for mesh:', mesh.name);
 			this._createOutlineForMesh(mesh);
 		} else if (mesh) {
 			console.log('Mesh is not a valid Mesh type:', mesh.constructor.name);
@@ -59,7 +63,7 @@ export class Outline {
 	}
 
 	/**
-	 * Creates an outline using the clone mesh technique.
+	 * Creates an outline mesh from the vertices of the original mesh.
 	 * @param mesh The mesh to create an outline for
 	 */
 	private _createOutlineForMesh(mesh: Mesh): void {
@@ -71,17 +75,16 @@ export class Outline {
 
 		console.log(`Creating outline for mesh: ${effectiveMesh.name}`);
 
-		// Store original rendering group and material
+		// Store original rendering group
 		this._originalRenderingGroups.set(effectiveMesh.id, effectiveMesh.renderingGroupId);
-		this._originalMaterials.set(effectiveMesh.id, effectiveMesh.material);
 		
-		// Set the original mesh to render in group 1 (after outline)
-		effectiveMesh.renderingGroupId = 1;
-
-		// Clone the mesh for outline
-		const outlineMesh = effectiveMesh.clone(`${effectiveMesh.name}_outline`, null, false);
+		// Set the original mesh to render in a higher group (on top)
+		effectiveMesh.renderingGroupId = this.originalRenderingGroupId;
+		
+		// Create a new mesh for the outline using the original's vertices
+		const outlineMesh = this._createOutlineMeshFromVertices(effectiveMesh);
 		if (!outlineMesh) {
-			console.error('Failed to clone mesh for outline');
+			console.error('Failed to create outline mesh');
 			return;
 		}
 
@@ -93,62 +96,123 @@ export class Outline {
 		effectiveMesh.getLODLevels().forEach((lod) => {
 			if (lod.mesh && isMesh(lod.mesh)) {
 				console.log(`Creating outline for LOD mesh: ${lod.mesh.name}`);
-				const lodOutline = lod.mesh.clone(`${lod.mesh.name}_outline`, null, false);
+				const lodOutline = this._createOutlineMeshFromVertices(lod.mesh);
 				if (lodOutline) {
 					this._configureOutlineMesh(lodOutline, lod.mesh);
 					this._outlineMeshes.push(lodOutline);
+					lod.mesh.renderingGroupId = this.originalRenderingGroupId;
 				}
 			}
 		});
 	}
+
 	/**
-	 * Configures a cloned mesh to act as an outline.
-	 * @param outlineMesh The cloned mesh to configure as outline
+	 * Creates a new mesh from the vertices of the source mesh.
+	 * @param sourceMesh The source mesh to copy vertices from
+	 * @returns A new mesh with the same vertices
+	 */
+	private _createOutlineMeshFromVertices(sourceMesh: Mesh): Mesh | null {
+		// Create a new mesh
+		const outlineMesh = new Mesh(`${sourceMesh.name}_outline_${Date.now()}`, this._scene);
+		
+		try {
+			// Get vertex data from the source mesh
+			const vertexData = VertexData.ExtractFromMesh(sourceMesh);
+			
+			// Apply vertex data to the new mesh
+			vertexData.applyToMesh(outlineMesh);
+			
+			return outlineMesh;
+		} catch (error) {
+			console.error('Error creating outline mesh:', error);
+			outlineMesh.dispose();
+			return null;
+		}
+	}
+
+	/**
+	 * Creates a solid material for the outline mesh.
+	 * @returns A new standard material configured for outline rendering
+	 */
+	private _createOutlineMaterial(): StandardMaterial {
+		const material = new StandardMaterial(`outlineMaterial_${Date.now()}`, this._scene);
+		
+		// Configure for solid color with no lighting
+		material.emissiveColor = this.outlineColor;
+		material.diffuseColor = this.outlineColor;
+		material.specularColor = Color3.Black();
+		material.ambientColor = Color3.Black();
+		
+		// Disable lighting effects
+		material.disableLighting = true;
+		
+		// Ensure outline is visible through other objects
+		material.zOffset = -0.1;
+		material.backFaceCulling = false;
+		
+		// Store for later cleanup
+		this._outlineMaterials.push(material);
+		
+		return material;
+	}
+
+	/**
+	 * Configures a mesh to act as an outline.
+	 * @param outlineMesh The mesh to configure as outline
 	 * @param originalMesh The original mesh to reference
 	 */
 	private _configureOutlineMesh(outlineMesh: Mesh, originalMesh: AbstractMesh): void {
-		// Copy transforms
-		outlineMesh.position = originalMesh.position.clone();
-		outlineMesh.rotation = originalMesh.rotation.clone();
-		outlineMesh.scaling = originalMesh.scaling.clone().multiplyInPlace(new Vector3(this.outlineThickness, this.outlineThickness, this.outlineThickness));
+		// Scale the outline mesh to be slightly larger than the original
+		outlineMesh.scaling = new Vector3(
+			this.outlineScale, 
+			this.outlineScale, 
+			this.outlineScale
+		);
+		
+		// Parent the outline mesh to the original mesh for perfect synchronization
+		outlineMesh.parent = originalMesh;
 
-		// Apply outline material
-		outlineMesh.material = this._outlineMaterial;
-        outlineMesh.setParent(originalMesh);
-
-		// Set rendering properties - CRITICAL: render in group 0 (BEFORE original)
-		outlineMesh.renderingGroupId = 0;
+		// Set rendering properties - outline renders behind original mesh
+		outlineMesh.renderingGroupId = this.outlineRenderingGroupId;
+		
+		// Apply the outline material
+		outlineMesh.material = this._createOutlineMaterial();
 		
 		// Disable interactions and effects
 		outlineMesh.receiveShadows = false;
 		outlineMesh.checkCollisions = false;
 		outlineMesh.isPickable = false;
 		outlineMesh.doNotSyncBoundingInfo = true;
-
-		// Create a unique name to avoid conflicts
-		outlineMesh.name = `${originalMesh.name}_outline_${Date.now()}`;
-		outlineMesh.id = `${originalMesh.id}_outline_${Date.now()}`;
 	}
 
 	/**
 	 * Clears all current outlines.
 	 */
 	private _clearOutline(): void {
-		// Dispose outline meshes
+		// Dispose outline meshes (parenting will be automatically cleared)
 		this._outlineMeshes.forEach((mesh) => {
 			mesh.dispose();
 		});
 		this._outlineMeshes.length = 0;
 		
-		// Restore original materials and rendering groups
-		if (this._currentSelectedMesh) {
-			const id = this._currentSelectedMesh.id;
-			if (this._originalRenderingGroups.has(id)) {
-				this._currentSelectedMesh.renderingGroupId = this._originalRenderingGroups.get(id) || 0;
-				this._originalRenderingGroups.delete(id);
+		// Dispose outline materials
+		this._outlineMaterials.forEach((material) => {
+			material.dispose();
+		});
+		this._outlineMaterials.length = 0;
+
+		// Restore original rendering groups
+		this._originalRenderingGroups.forEach((originalGroup, meshId) => {
+			const mesh = this._scene.getMeshByID(meshId);
+			if (mesh && isMesh(mesh)) {
+				mesh.renderingGroupId = originalGroup;
 			}
-		}
-		this._originalMaterials.clear();
+		});
+		
+		// Clear stored data
+		this._originalRenderingGroups.clear();
+		
+		console.log('Cleared vertex-based outline');
 	}
 
 	/**
@@ -157,24 +221,25 @@ export class Outline {
 	 */
 	public updateOutlineColor(color: Color3): void {
 		this.outlineColor = color;
-		if (this._outlineMaterial) {
-			this._outlineMaterial.diffuseColor = color;
-			this._outlineMaterial.emissiveColor = color;
-		}
+		
+		// Update color for all outline materials
+		this._outlineMaterials.forEach((material) => {
+			material.emissiveColor = color;
+			material.diffuseColor = color;
+		});
 	}
 
 	/**
-	 * Updates the outline thickness dynamically.
-	 * @param thickness The new outline thickness (scale factor)
+	 * Updates the outline scale dynamically.
+	 * @param scale The new scale factor (e.g., 1.05 for 5% larger than original)
 	 */
-	public updateOutlineThickness(thickness: number): void {
-		this.outlineThickness = thickness;
-		if (this._currentSelectedMesh && isMesh(this._currentSelectedMesh)) {
-			this._outlineMeshes.forEach((mesh) => {
-				const originalScaling = this._currentSelectedMesh!.scaling.clone();
-				mesh.scaling = originalScaling.multiplyInPlace(new Vector3(thickness, thickness, thickness));
-			});
-		}
+	public updateOutlineScale(scale: number): void {
+		this.outlineScale = scale;
+		
+		// Update all outline meshes with new scale
+		this._outlineMeshes.forEach((mesh) => {
+			mesh.scaling = new Vector3(scale, scale, scale);
+		});
 	}
 
 	/**
@@ -182,9 +247,6 @@ export class Outline {
 	 */
 	public dispose(): void {
 		this._clearOutline();
-		if (this._outlineMaterial) {
-			this._outlineMaterial.dispose();
-		}
 		this._currentSelectedMesh = null;
 	}
 
