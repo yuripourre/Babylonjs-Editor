@@ -64,6 +64,7 @@ export class EditorPreviewIcons extends Component<IEditorPreviewIconsProps, IEdi
 
 							if (isNode(button.node)) {
 								this.props.editor.layout.preview.gizmo.setAttachedNode(button.node);
+								this.props.editor.layout.preview.setSelectedObject(button.node);
 							}
 						}}
 						className={`

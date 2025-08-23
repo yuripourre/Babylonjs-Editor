@@ -455,6 +455,11 @@ export class EditorGraph extends Component<IEditorGraphProps, IEditorGraphState>
 
 		if (isNode(node.nodeData)) {
 			this.props.editor.layout.preview.gizmo.setAttachedNode(node.nodeData);
+			// Set outline for selected object
+			this.props.editor.layout.preview.setSelectedObject(node.nodeData);
+		} else {
+			// Clear outline if selected object is not a node
+			this.props.editor.layout.preview.setSelectedObject(null);
 		}
 
 		if (ev.ctrlKey || ev.metaKey) {

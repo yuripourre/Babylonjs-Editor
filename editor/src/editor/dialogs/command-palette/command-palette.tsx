@@ -151,6 +151,9 @@ export class CommandPalette extends Component<ICommandPaletteProps, ICommandPale
 						this.props.editor.layout.animations.setEditedObject(entity);
 						if (isNode(entity)) {
 							this.props.editor.layout.preview.gizmo.setAttachedNode(entity);
+							this.props.editor.layout.preview.setSelectedObject(entity);
+						} else {
+							this.props.editor.layout.preview.setSelectedObject(null);
 						}
 
 						this.props.editor.layout.preview.focusObject(entity);

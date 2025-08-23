@@ -41,6 +41,8 @@ import { ToolbarRadioGroup, ToolbarRadioGroupItem } from "../../ui/shadcn/ui/too
 
 import { Editor } from "../main";
 
+import { Outline } from "../rendering/outline";
+
 import { isSound } from "../../tools/guards/sound";
 import { isVector3 } from "../../tools/guards/math";
 import { isDomTextInputFocused } from "../../tools/dom";
@@ -164,6 +166,10 @@ export class EditorPreview extends Component<IEditorPreviewProps, IEditorPreview
 	 */
 	public statistics: Stats;
 
+	/**
+	 * The custom outline system for selected objects.
+	 */
+	public outline: Outline;
 	private _renderScene: boolean = true;
 	private _mouseDownPosition: Vector2 = Vector2.Zero();
 
@@ -469,6 +475,9 @@ export class EditorPreview extends Component<IEditorPreviewProps, IEditorPreview
 			this.scene.soundTracks = [this.scene.mainSoundTrack];
 		}
 
+		// Initialize custom outline system for selected objects
+		this.outline = new Outline(this.scene);
+
 		this.camera = new EditorCamera("camera", Vector3.Zero(), this.scene);
 		this.camera.attachControl(true);
 
@@ -624,6 +633,17 @@ export class EditorPreview extends Component<IEditorPreviewProps, IEditorPreview
 			this.props.editor.layout.graph.setSelectedNode(mesh);
 			this.props.editor.layout.inspector.setEditedObject(mesh);
 			this.props.editor.layout.animations.setEditedObject(mesh);
+			
+			// Set outline for selected object
+			this.setSelectedObject(mesh);
+		} else {
+			// Clear selection when clicking on empty space
+			this.gizmo.setAttachedNode(null);
+			this.props.editor.layout.inspector.setEditedObject(null);
+			this.props.editor.layout.animations.setEditedObject(null);
+			
+			// Clear outline when nothing is selected
+			this.setSelectedObject(null);
 		}
 	}
 
@@ -721,6 +741,29 @@ export class EditorPreview extends Component<IEditorPreviewProps, IEditorPreview
 					onStart: () => (mesh.renderOverlay = true),
 				});
 			});
+		}
+	}
+
+	/**
+	 * Sets the custom outline for the selected mesh using mesh cloning.
+	 * @param mesh The mesh to outline, or null to clear the outline
+	 */
+	private _setSelectedMeshOutline(mesh: AbstractMesh | null): void {
+		// Use the custom outline system
+		this.outline.setOutlineMesh(mesh);
+	}
+
+	/**
+	 * Public method to set the selected object and update its custom outline.
+	 * This should be called when an object is selected.
+	 * @param object The selected object (Node, mesh, etc.)
+	 */
+	public setSelectedObject(object: Node | null): void {
+		if (isAbstractMesh(object)) {
+			this._setSelectedMeshOutline(object);
+		} else {
+			// Clear outline if the selected object is not a mesh
+			this._setSelectedMeshOutline(null);
 		}
 	}
 
