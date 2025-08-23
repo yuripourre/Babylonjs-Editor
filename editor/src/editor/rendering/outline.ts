@@ -114,6 +114,7 @@ export class Outline {
 
 		// Apply outline material
 		outlineMesh.material = this._outlineMaterial;
+        outlineMesh.setParent(originalMesh);
 
 		// Set rendering properties - CRITICAL: render in group 0 (BEFORE original)
 		outlineMesh.renderingGroupId = 0;
@@ -172,21 +173,6 @@ export class Outline {
 			this._outlineMeshes.forEach((mesh) => {
 				const originalScaling = this._currentSelectedMesh!.scaling.clone();
 				mesh.scaling = originalScaling.multiplyInPlace(new Vector3(thickness, thickness, thickness));
-			});
-		}
-	}
-
-	/**
-	 * Updates the outline position to match the original mesh.
-	 * Call this if the original mesh has moved.
-	 */
-	public updateOutlinePosition(): void {
-		if (this._currentSelectedMesh && isMesh(this._currentSelectedMesh)) {
-			this._outlineMeshes.forEach((mesh) => {
-				mesh.position = this._currentSelectedMesh!.position.clone();
-				mesh.rotation = this._currentSelectedMesh!.rotation.clone();
-				const originalScaling = this._currentSelectedMesh!.scaling.clone();
-				mesh.scaling = originalScaling.multiplyInPlace(new Vector3(this.outlineThickness, this.outlineThickness, this.outlineThickness));
 			});
 		}
 	}
