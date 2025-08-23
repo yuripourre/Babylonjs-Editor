@@ -1,46 +1,44 @@
-import { AbstractMesh, Color3, Mesh, Scene, StandardMaterial, Vector3 } from "babylonjs";
+import { AbstractMesh, Color3, Mesh, Scene, StandardMaterial, Vector3, Material } from "babylonjs";
 
 import { isMesh, isInstancedMesh } from "../../tools/guards/nodes";
 
-/**
- * Perfect outline class using two-pass rendering technique.
- * This creates flawless outlines without missing pixels by cloning and scaling meshes.
- */
 export class Outline {
-	private _scene: Scene;
 	private _outlineMeshes: Mesh[] = [];
 	private _outlineMaterial: StandardMaterial;
 	private _currentSelectedMesh: AbstractMesh | null = null;
+	private _originalMaterials: Map<string, Material | null> = new Map();
+	private _originalRenderingGroups: Map<string, number> = new Map();
 
 	/**
 	 * The outline color.
 	 */
-	public outlineColor: Color3 = Color3.FromHexString("#FF6B35");
+	public outlineColor: Color3 = Color3.FromHexString("#446BAA");
 
 	/**
 	 * The outline thickness (scale factor).
 	 */
-	public outlineThickness: number = 1.02; // 2% larger than original
+	public outlineThickness: number = 1.03; // 3% larger than original
 
 	/**
 	 * The rendering group ID for outline meshes.
 	 */
-	public renderingGroupId: number = 1; // Separate group, renders after group 0
+	public renderingGroupId: number = 0; // Same group as original meshes
 
 	constructor(scene: Scene) {
-		this._scene = scene;
-		
-		// Create outline material - use wireframe for clean edges
-		this._outlineMaterial = new StandardMaterial(`outlineMaterial_${Date.now()}`, this._scene);
+		// Create outline material - solid color
+		this._outlineMaterial = new StandardMaterial(`outlineMaterial_${Date.now()}`, scene);
 		this._outlineMaterial.diffuseColor = this.outlineColor;
 		this._outlineMaterial.emissiveColor = this.outlineColor;
 		this._outlineMaterial.disableLighting = true;
-		this._outlineMaterial.wireframe = true; // Use wireframe for clean outline
-		this._outlineMaterial.freeze(); // Optimize performance
+		this._outlineMaterial.wireframe = false;
+		this._outlineMaterial.backFaceCulling = false;
+		this._outlineMaterial.zOffset = -0.5; // Negative zOffset to ensure it renders behind
+		this._outlineMaterial.alpha = 1.0;
+		this._outlineMaterial.freeze();
 	}
 
 	/**
-	 * Sets the perfect outline for the specified mesh using two-pass rendering.
+	 * Sets the outline for the specified mesh using the edge detection technique.
 	 * @param mesh The mesh to outline, or null to clear the outline
 	 */
 	public setOutlineMesh(mesh: AbstractMesh | null): void {
@@ -51,8 +49,8 @@ export class Outline {
 
 		// Set new outline
 		if (mesh && isMesh(mesh)) {
-			console.log('Creating perfect outline for mesh:', mesh.name);
-			this._createPerfectOutlineForMesh(mesh);
+			console.log('Creating outline for mesh:', mesh.name);
+			this._createOutlineForMesh(mesh);
 		} else if (mesh) {
 			console.log('Mesh is not a valid Mesh type:', mesh.constructor.name);
 		}
@@ -61,67 +59,70 @@ export class Outline {
 	}
 
 	/**
-	 * Creates a perfect outline using the two-pass rendering technique.
+	 * Creates an outline using the clone mesh technique.
 	 * @param mesh The mesh to create an outline for
 	 */
-	private _createPerfectOutlineForMesh(mesh: Mesh): void {
+	private _createOutlineForMesh(mesh: Mesh): void {
 		const effectiveMesh = isInstancedMesh(mesh) ? mesh.sourceMesh : mesh;
 
 		if (!isMesh(effectiveMesh)) {
 			return;
 		}
 
-		// Ensure original mesh renders in group 0 (before outline)
-		effectiveMesh.renderingGroupId = 0;
+		console.log(`Creating outline for mesh: ${effectiveMesh.name}`);
 
-		console.log(`Creating perfect outline for mesh: ${effectiveMesh.name}, thickness: ${this.outlineThickness}`);
+		// Store original rendering group and material
+		this._originalRenderingGroups.set(effectiveMesh.id, effectiveMesh.renderingGroupId);
+		this._originalMaterials.set(effectiveMesh.id, effectiveMesh.material);
+		
+		// Set the original mesh to render in group 1 (after outline)
+		effectiveMesh.renderingGroupId = 1;
 
 		// Clone the mesh for outline
-		const outlineMesh = effectiveMesh.clone(`${effectiveMesh.name}_perfect_outline`);
+		const outlineMesh = effectiveMesh.clone(`${effectiveMesh.name}_outline`, null, false);
 		if (!outlineMesh) {
 			console.error('Failed to clone mesh for outline');
 			return;
 		}
 
 		// Configure the outline mesh
-		this._configurePerfectOutlineMesh(outlineMesh, effectiveMesh);
+		this._configureOutlineMesh(outlineMesh, effectiveMesh);
 		this._outlineMeshes.push(outlineMesh);
 
 		// Handle LOD levels
 		effectiveMesh.getLODLevels().forEach((lod) => {
 			if (lod.mesh && isMesh(lod.mesh)) {
-				console.log(`Creating perfect outline for LOD mesh: ${lod.mesh.name}`);
-				const lodOutline = lod.mesh.clone(`${lod.mesh.name}_perfect_outline`);
+				console.log(`Creating outline for LOD mesh: ${lod.mesh.name}`);
+				const lodOutline = lod.mesh.clone(`${lod.mesh.name}_outline`, null, false);
 				if (lodOutline) {
-					this._configurePerfectOutlineMesh(lodOutline, effectiveMesh);
+					this._configureOutlineMesh(lodOutline, lod.mesh);
 					this._outlineMeshes.push(lodOutline);
 				}
 			}
 		});
 	}
-
 	/**
-	 * Configures a cloned mesh to act as a perfect outline.
+	 * Configures a cloned mesh to act as an outline.
 	 * @param outlineMesh The cloned mesh to configure as outline
-	 * @param originalMesh The original mesh to parent to
+	 * @param originalMesh The original mesh to reference
 	 */
-	private _configurePerfectOutlineMesh(outlineMesh: Mesh, originalMesh: AbstractMesh): void {
-		// Copy world matrix instead of parenting to avoid transform conflicts
-		outlineMesh.position = originalMesh.getAbsolutePosition().clone();
+	private _configureOutlineMesh(outlineMesh: Mesh, originalMesh: AbstractMesh): void {
+		// Copy transforms
+		outlineMesh.position = originalMesh.position.clone();
 		outlineMesh.rotation = originalMesh.rotation.clone();
 		outlineMesh.scaling = originalMesh.scaling.clone().multiplyInPlace(new Vector3(this.outlineThickness, this.outlineThickness, this.outlineThickness));
 
 		// Apply outline material
 		outlineMesh.material = this._outlineMaterial;
 
-		// Set rendering properties - render in group 1 (after group 0)
-		outlineMesh.renderingGroupId = this.renderingGroupId;
+		// Set rendering properties - CRITICAL: render in group 0 (BEFORE original)
+		outlineMesh.renderingGroupId = 0;
 		
 		// Disable interactions and effects
 		outlineMesh.receiveShadows = false;
 		outlineMesh.checkCollisions = false;
-		outlineMesh.isPickable = false; // Don't interfere with picking
-		outlineMesh.doNotSyncBoundingInfo = true; // Don't affect bounding calculations
+		outlineMesh.isPickable = false;
+		outlineMesh.doNotSyncBoundingInfo = true;
 
 		// Create a unique name to avoid conflicts
 		outlineMesh.name = `${originalMesh.name}_outline_${Date.now()}`;
@@ -129,13 +130,24 @@ export class Outline {
 	}
 
 	/**
-	 * Clears all current outline meshes.
+	 * Clears all current outlines.
 	 */
 	private _clearOutline(): void {
+		// Dispose outline meshes
 		this._outlineMeshes.forEach((mesh) => {
 			mesh.dispose();
 		});
 		this._outlineMeshes.length = 0;
+		
+		// Restore original materials and rendering groups
+		if (this._currentSelectedMesh) {
+			const id = this._currentSelectedMesh.id;
+			if (this._originalRenderingGroups.has(id)) {
+				this._currentSelectedMesh.renderingGroupId = this._originalRenderingGroups.get(id) || 0;
+				this._originalRenderingGroups.delete(id);
+			}
+		}
+		this._originalMaterials.clear();
 	}
 
 	/**
@@ -144,8 +156,10 @@ export class Outline {
 	 */
 	public updateOutlineColor(color: Color3): void {
 		this.outlineColor = color;
-		this._outlineMaterial.diffuseColor = color;
-		this._outlineMaterial.emissiveColor = color;
+		if (this._outlineMaterial) {
+			this._outlineMaterial.diffuseColor = color;
+			this._outlineMaterial.emissiveColor = color;
+		}
 	}
 
 	/**
@@ -169,7 +183,7 @@ export class Outline {
 	public updateOutlinePosition(): void {
 		if (this._currentSelectedMesh && isMesh(this._currentSelectedMesh)) {
 			this._outlineMeshes.forEach((mesh) => {
-				mesh.position = this._currentSelectedMesh!.getAbsolutePosition().clone();
+				mesh.position = this._currentSelectedMesh!.position.clone();
 				mesh.rotation = this._currentSelectedMesh!.rotation.clone();
 				const originalScaling = this._currentSelectedMesh!.scaling.clone();
 				mesh.scaling = originalScaling.multiplyInPlace(new Vector3(this.outlineThickness, this.outlineThickness, this.outlineThickness));
@@ -182,7 +196,9 @@ export class Outline {
 	 */
 	public dispose(): void {
 		this._clearOutline();
-		this._outlineMaterial.dispose();
+		if (this._outlineMaterial) {
+			this._outlineMaterial.dispose();
+		}
 		this._currentSelectedMesh = null;
 	}
 
