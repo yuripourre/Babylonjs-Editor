@@ -541,6 +541,7 @@ export class EditorAssetsBrowser extends Component<IEditorAssetsBrowserProps, IE
 	private _getFilesGridComponent(): ReactNode {
 		return (
 			<div className="flex flex-col w-full h-full">
+				{/* Toolbar */}
 				<div className="flex gap-2 justify-between w-full h-10 min-h-10 bg-primary-foreground">
 					<div className="flex gap-2 h-full">
 						<Button
@@ -563,21 +564,6 @@ export class EditorAssetsBrowser extends Component<IEditorAssetsBrowserProps, IE
 					</div>
 
 					<div className="flex gap-2 items-center">
-						<div className="relative">
-							<Input
-								placeholder="Search"
-								value={this.state.gridSearch}
-								onChange={(e) => this.setState({ gridSearch: e.currentTarget.value })}
-								className={`
-                                    max-w-52 w-full h-8 !border-none pl-7
-                                    hover:border-border focus:border-border
-                                    transition-all duration-300 ease-in-out    
-                                `}
-							/>
-
-							<FaMagnifyingGlass className="absolute top-1/2 -translate-y-1/2 left-2 w-4 h-4" />
-						</div>
-
 						<DropdownMenu onOpenChange={(o) => o && this.forceUpdate()}>
 							<DropdownMenuTrigger asChild>
 								<Button
@@ -612,6 +598,23 @@ export class EditorAssetsBrowser extends Component<IEditorAssetsBrowserProps, IE
 				</div>
 
 				{this._getBreadcrumbComponent()}
+
+				{/* Search bar below the breadcrumb */}
+				<div className="relative flex items-center px-3 w-full h-12 min-h-12 bg-primary-foreground/50 border-b border-border/20">
+					<Input
+						placeholder="Search assets by name..."
+						value={this.state.gridSearch}
+						onChange={(e) => this.setState({ gridSearch: e.currentTarget.value })}
+						className={`
+							w-full h-9 !border-none pl-10 pr-4
+							hover:border-border focus:border-border
+							transition-all duration-300 ease-in-out
+							bg-background/50 hover:bg-background/70 focus:bg-background
+						`}
+					/>
+					<FaMagnifyingGlass className="absolute top-1/2 -translate-y-1/2 left-6 w-4 h-4 text-muted-foreground" />
+				</div>
+
 				{this._getGridComponent()}
 			</div>
 		);
