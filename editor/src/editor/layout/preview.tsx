@@ -1122,17 +1122,17 @@ export class EditorPreview extends Component<IEditorPreviewProps, IEditorPreview
 						}
 
 						// If the user dropped a scene/skeleton asset on top of a mesh that already has a skeleton
-						// and the imported scene contains skeleton(s), open the bone mapping window so the user
+						// and the imported scene contains skeleton(s), open the bone mapping dialog so the user
 						// can map bones between the existing mesh skeleton and the imported skeleton(s).
 						try {
 							if (mesh && mesh.skeleton && result?.skeletons && result.skeletons.length > 0) {
-								ipcRenderer.send("window:open", "build/src/editor/windows/bone-mapping", {
-									mesh: { name: mesh.name, uniqueId: mesh.uniqueId },
-									importedSkeletons: result.skeletons.map((s) => ({ name: s.name, uniqueId: s.uniqueId })),
-								});
+								this.props.editor.layout.assets.openBoneMappingDialog(
+									{ name: mesh.name, uniqueId: mesh.uniqueId },
+									result.skeletons.map((s) => ({ name: s.name, uniqueId: s.uniqueId }))
+								);
 							}
 						} catch (e) {
-							console.error("Failed to open bone mapping window:", e);
+							console.error("Failed to open bone mapping dialog:", e);
 						}
 					});
 					break;

@@ -71,6 +71,7 @@ import { AssetBrowserImageItem } from "./assets-browser/items/image-item";
 import { AssetBrowserMaterialItem } from "./assets-browser/items/material-item";
 import { AssetBrowserCinematicItem } from "./assets-browser/items/cinematic-item";
 import { AssetsBrowserItem, IAssetsBrowserItemProps } from "./assets-browser/items/item";
+import { BoneMappingDialog } from "./assets-browser/bone-mapping-dialog";
 
 import { listenGuiAssetsEvents } from "./assets-browser/events/gui";
 import { listenSceneAssetsEvents } from "./assets-browser/events/scene";
@@ -120,6 +121,15 @@ export interface IEditorAssetsBrowserState {
 	filesTreeNodes: TreeNodeInfo[];
 
 	dragAndDroppingFiles: boolean;
+
+	/**
+	 * Bone mapping dialog state
+	 */
+	boneMappingDialog: {
+		open: boolean;
+		mesh?: { name: string; uniqueId: number };
+		importedSkeletons?: { name: string; uniqueId: number }[];
+	};
 }
 
 export class EditorAssetsBrowser extends Component<IEditorAssetsBrowserProps, IEditorAssetsBrowserState> {
@@ -143,53 +153,70 @@ export class EditorAssetsBrowser extends Component<IEditorAssetsBrowserProps, IE
 			showGeneratedFiles: false,
 
 			dragAndDroppingFiles: false,
+
+			boneMappingDialog: {
+				open: false,
+				mesh: undefined,
+				importedSkeletons: undefined,
+			},
 		};
 	}
 
 	public render(): ReactNode {
 		return (
-			<PanelGroup direction="horizontal" className="w-full h-full text-foreground">
-				<Panel order={1} minSize={20} className="w-full h-full" defaultSize={this.state.sizes[0]}>
-					<div className="flex flex-col w-full h-full">
-						<div className="relative flex items-center px-1 w-full h-10 min-h-10 bg-primary-foreground">
-							<Input
-								placeholder="Search"
-								value={this.state.treeSearch}
-								onChange={(e) => {
-									this.setState({ treeSearch: e.currentTarget.value }, () => {
-										if (projectConfiguration.path) {
-											this._refreshFilesTreeNodes(projectConfiguration.path!);
-										}
-									});
-								}}
-								className={`
-                                    w-full h-8 !border-none pl-7
-                                    hover:border-border focus:border-border
-                                    transition-all duration-300 ease-in-out    
-                                `}
-							/>
+			<>
+				<PanelGroup direction="horizontal" className="w-full h-full text-foreground">
+					<Panel order={1} minSize={20} className="w-full h-full" defaultSize={this.state.sizes[0]}>
+						<div className="flex flex-col w-full h-full">
+							<div className="relative flex items-center px-1 w-full h-10 min-h-10 bg-primary-foreground">
+								<Input
+									placeholder="Search"
+									value={this.state.treeSearch}
+									onChange={(e) => {
+										this.setState({ treeSearch: e.currentTarget.value }, () => {
+											if (projectConfiguration.path) {
+												this._refreshFilesTreeNodes(projectConfiguration.path!);
+											}
+										});
+									}}
+									className={`
+                                        w-full h-8 !border-none pl-7
+                                        hover:border-border focus:border-border
+                                        transition-all duration-300 ease-in-out    
+                                    `}
+								/>
 
-							<FaMagnifyingGlass className="absolute top-1/2 -translate-y-1/2 left-2 w-4 h-4" />
+								<FaMagnifyingGlass className="absolute top-1/2 -translate-y-1/2 left-2 w-4 h-4" />
+							</div>
+
+							<div className="flex-1 w-full h-full overflow-auto">
+								<Tree
+									contents={this.state.filesTreeNodes}
+									onNodeClick={(n) => this._handleNodeClicked(n)}
+									onNodeExpand={(n) => this._handleNodeExpanded(n)}
+									onNodeCollapse={(n) => this._handleNodeCollapsed(n)}
+									onNodeDoubleClick={(n) => this._handleNodeDoubleClicked(n)}
+								/>
+							</div>
 						</div>
+					</Panel>
 
-						<div className="flex-1 w-full h-full overflow-auto">
-							<Tree
-								contents={this.state.filesTreeNodes}
-								onNodeClick={(n) => this._handleNodeClicked(n)}
-								onNodeExpand={(n) => this._handleNodeExpanded(n)}
-								onNodeCollapse={(n) => this._handleNodeCollapsed(n)}
-								onNodeDoubleClick={(n) => this._handleNodeDoubleClicked(n)}
-							/>
-						</div>
-					</div>
-				</Panel>
+					<PanelResizeHandle className="w-2 bg-border/10 h-full cursor-pointer hover:bg-black/30 transition-all duration-300" />
 
-				<PanelResizeHandle className="w-2 bg-border/10 h-full cursor-pointer hover:bg-black/30 transition-all duration-300" />
+					<Panel order={2} className="w-full h-full" defaultSize={this.state.sizes[1]}>
+						{this._getFilesGridComponent()}
+					</Panel>
+				</PanelGroup>
 
-				<Panel order={2} className="w-full h-full" defaultSize={this.state.sizes[1]}>
-					{this._getFilesGridComponent()}
-				</Panel>
-			</PanelGroup>
+				{/* Bone Mapping Dialog */}
+				<BoneMappingDialog
+					open={this.state.boneMappingDialog.open}
+					onOpenChange={(open) => this.setState({ boneMappingDialog: { ...this.state.boneMappingDialog, open } })}
+					mesh={this.state.boneMappingDialog.mesh}
+					importedSkeletons={this.state.boneMappingDialog.importedSkeletons}
+					editor={this.props.editor}
+				/>
+			</>
 		);
 	}
 
@@ -1237,5 +1264,18 @@ export class EditorAssetsBrowser extends Component<IEditorAssetsBrowserProps, IE
 			callback(node, i);
 			this._forEachNode(node.childNodes, callback);
 		}
+	}
+
+	/**
+	 * Opens the bone mapping dialog
+	 */
+	public openBoneMappingDialog(mesh: { name: string; uniqueId: number }, importedSkeletons: { name: string; uniqueId: number }[]): void {
+		this.setState({
+			boneMappingDialog: {
+				open: true,
+				mesh,
+				importedSkeletons,
+			},
+		});
 	}
 }

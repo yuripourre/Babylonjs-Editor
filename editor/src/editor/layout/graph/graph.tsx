@@ -3,6 +3,7 @@ import { platform } from "os";
 import { Component, PropsWithChildren, ReactNode } from "react";
 
 import { AiOutlinePlus, AiOutlineClose } from "react-icons/ai";
+import { GiSkeletonInside } from "react-icons/gi";
 
 import { Mesh, SubMesh, Node, InstancedMesh } from "babylonjs";
 
@@ -179,6 +180,9 @@ export class EditorGraphContextMenu extends Component<IEditorGraphContextMenuPro
 	}
 
 	private _getMeshItems(): ReactNode {
+		// Check if the mesh has a skeleton with animation
+		const hasSkeletonWithAnimation = this._checkSkeletonWithAnimation();
+
 		return (
 			<>
 				<ContextMenuItem onClick={() => this.props.editor.layout.preview.focusObject(this.props.object)}>
@@ -196,8 +200,61 @@ export class EditorGraphContextMenu extends Component<IEditorGraphContextMenuPro
 						<ContextMenuItem onClick={() => this._updateMeshGeometry(this.props.object)}>Update Geometry...</ContextMenuItem>
 					</>
 				)}
+
+				{/* Show animation option for any object with skeleton, not just strict mesh types */}
+				{hasSkeletonWithAnimation && (
+					<>
+						<ContextMenuSeparator />
+						<ContextMenuItem onClick={() => this._handleAnimateSkeleton(this.props.object)}>
+							<GiSkeletonInside className="w-5 h-5" /> Animate Skeleton
+						</ContextMenuItem>
+					</>
+				)}
 			</>
 		);
+	}
+
+	private _checkSkeletonWithAnimation(): boolean {
+		try {
+			// Check if object has a skeleton, regardless of strict mesh type
+			if (!this.props.object || !this.props.object.skeleton) {
+				return false;
+			}
+
+			const skeleton = this.props.object.skeleton;
+			return skeleton.animations && skeleton.animations.length > 0;
+		} catch (error) {
+			console.warn("Error checking skeleton animation:", error);
+			return false;
+		}
+	}
+
+	private _handleAnimateSkeleton(mesh: any): void {
+		try {
+			if (!mesh || !mesh.skeleton) {
+				console.warn("Mesh or skeleton not found for animation");
+				return;
+			}
+
+			const skeleton = mesh.skeleton;
+			
+			// Start the first available animation
+			if (skeleton.animations && skeleton.animations.length > 0) {
+				const animation = skeleton.animations[0];
+				const highestFrame = animation.getHighestFrame();
+				
+				// Start the animation
+				this.props.editor.layout.preview.scene.beginAnimation(skeleton, 0, highestFrame, true);
+				
+				console.log(`Started animation for skeleton: ${skeleton.name} (${highestFrame} frames)`);
+				
+				// Notify the user
+				this.props.editor.layout.console.log(`Started skeleton animation: ${skeleton.name} with ${highestFrame} frames`);
+			}
+		} catch (error) {
+			console.error("Error starting skeleton animation:", error);
+			this.props.editor.layout.console.error(`Failed to start skeleton animation: ${error}`);
+		}
 	}
 
 	private _createMeshInstance(mesh: Mesh): void {
