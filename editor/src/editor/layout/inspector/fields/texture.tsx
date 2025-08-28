@@ -34,7 +34,7 @@ import { EditorInspectorSwitchField } from "./switch";
 import { EditorInspectorSectionField } from "./section";
 
 import { ProceduralTextureThumbnailRenderer } from "../../assets-browser/renderers/procedural-texture-thumbnail";
-import { isProceduralTexture, updateTexture, renderProceduralTextureProperties, getProceduralTextureType } from "./procedural-texture";
+import { isProceduralTexture, getProceduralTextureType } from "./procedural-texture";
 
 export interface IEditorInspectorTextureFieldProps extends PropsWithChildren {
 	title: string;
@@ -589,27 +589,8 @@ export class EditorInspectorTextureField extends Component<IEditorInspectorTextu
 						items={WRAP_MODE_ITEMS}
 					/>
 				</EditorInspectorSectionField>
-
-				{/* Dynamic Procedural Texture Properties */}
-				{this._getDynamicProceduralTextureProperties(texture)}
 			</div>
 		);
-	}
-
-	private _getDynamicProceduralTextureProperties(texture: any): ReactNode {
-		const onChange = () => {
-			this.forceUpdate();
-			updateTexture(texture);
-			this.props.onChange?.(texture);
-		};
-
-		// Use the helper function from procedural-texture.tsx
-		return renderProceduralTextureProperties({
-			texture,
-			noUndoRedo: this.props.noUndoRedo,
-			onChange,
-			forceUpdate: () => this.forceUpdate(),
-		});
 	}
 
 	private async _computeTemporaryPreview(): Promise<void> {

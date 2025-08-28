@@ -1191,6 +1191,9 @@ export class EditorAssetsBrowser extends Component<IEditorAssetsBrowserProps, IE
 			case ".wave":
 				return this.props.editor.layout.inspector.setEditedObject(new FileInspectorObject(item.props.absolutePath));
 
+			case ".proceduraltexture":
+				return this.props.editor.layout.inspector.setEditedObject(new FileInspectorObject(item.props.absolutePath));
+
 			case ".glb":
 			case ".gltf":
 			case ".babylon":

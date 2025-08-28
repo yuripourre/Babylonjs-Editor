@@ -5,6 +5,7 @@ import { Component, ReactNode } from "react";
 import { EditorInspectorSoundComponent } from "./file/sound";
 import { EditorInspectorImageComponent } from "./file/image";
 import { EditorInspectorMarkdownComponent } from "./file/markdown";
+import { EditorInspectorProceduralTextureComponent } from "./file/procedural-texture";
 
 import { IEditorInspectorImplementationProps } from "./inspector";
 
@@ -48,6 +49,9 @@ export class EditorFileInspector extends Component<IEditorInspectorImplementatio
 			case ".wav":
 			case ".wave":
 				return <EditorInspectorSoundComponent object={this.props.object} />;
+
+			case ".proceduraltexture":
+				return <EditorInspectorProceduralTextureComponent object={this.props.object} />;
 
 			default:
 				return null;
