@@ -365,7 +365,6 @@ export class EditorInspectorTextureField extends Component<IEditorInspectorTextu
 		}
 
 		if (isProceduralTexture(texture)) {
-			console.log("Procedural texture");
 			return this._getProceduralTextureInspector(texture);
 		}
 
@@ -507,7 +506,6 @@ export class EditorInspectorTextureField extends Component<IEditorInspectorTextu
 	}
 
 	private _getProceduralTextureInspector(texture: any): ReactNode {
-		console.log("Procedural texture inspector");
 		const textureType = getProceduralTextureType(texture);
 		const onChange = () => {
 			this.forceUpdate();
