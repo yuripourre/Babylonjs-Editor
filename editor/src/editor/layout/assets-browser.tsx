@@ -744,7 +744,6 @@ export class EditorAssetsBrowser extends Component<IEditorAssetsBrowserProps, IE
 										<ContextMenuItem onClick={() => this._handleAddProceduralTexture("FireProceduralTexture")}>Fire</ContextMenuItem>
 										<ContextMenuItem onClick={() => this._handleAddProceduralTexture("GrassProceduralTexture")}>Grass</ContextMenuItem>
 										<ContextMenuItem onClick={() => this._handleAddProceduralTexture("MarbleProceduralTexture")}>Marble</ContextMenuItem>
-										<ContextMenuItem onClick={() => this._handleAddProceduralTexture("NormalMapProceduralTexture")}>Normal Map</ContextMenuItem>
 										<ContextMenuItem onClick={() => this._handleAddProceduralTexture("PerlinNoiseProceduralTexture")}>Perlin Noise</ContextMenuItem>
 										<ContextMenuItem onClick={() => this._handleAddProceduralTexture("RoadProceduralTexture")}>Road</ContextMenuItem>
 										<ContextMenuItem onClick={() => this._handleAddProceduralTexture("StarfieldProceduralTexture")}>Starfield</ContextMenuItem>
