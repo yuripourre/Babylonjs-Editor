@@ -1,6 +1,9 @@
 import { extname, join, dirname } from "path/posix";
 
 import sharp from "sharp";
+import { readJSON } from "fs-extra";
+import "babylonjs-procedural-textures";
+import { UniqueNumber } from "../../../../tools/tools";
 
 import { Component, DragEvent, PropsWithChildren, ReactNode } from "react";
 
@@ -29,6 +32,12 @@ import { EditorInspectorListField } from "./list";
 import { EditorInspectorNumberField } from "./number";
 import { EditorInspectorSwitchField } from "./switch";
 import { EditorInspectorSectionField } from "./section";
+import { EditorInspectorColorField } from "./color";
+import { ProceduralTextureThumbnailRenderer } from "../../assets-browser/renderers/procedural-texture-thumbnail";
+import { isProceduralTexture, getProceduralTextureType, gatherProperties, getPropertyConfig, formatPropertyLabel, updateTexture } from "./procedural-texture";
+
+const TEXTURE_WIDTH = 128;
+const TEXTURE_HEIGHT = 128;
 
 export interface IEditorInspectorTextureFieldProps extends PropsWithChildren {
 	title: string;
@@ -61,6 +70,16 @@ export class EditorInspectorTextureField extends Component<IEditorInspectorTextu
 		};
 
 		this._computeTemporaryPreview();
+	}
+
+	public componentDidUpdate(prevProps: IEditorInspectorTextureFieldProps): void {
+		const prevTexture = prevProps.object[prevProps.property];
+		const currentTexture = this.props.object[this.props.property];
+
+		// If the texture changed, recompute the preview
+		if (prevTexture !== currentTexture) {
+			this._computeTemporaryPreview();
+		}
 	}
 
 	public render(): ReactNode {
@@ -107,16 +126,26 @@ export class EditorInspectorTextureField extends Component<IEditorInspectorTextu
 												onFinishChange={() => this.props.onChange?.(texture)}
 											/>
 										)}
-										<EditorInspectorSwitchField
-											noUndoRedo={this.props.noUndoRedo}
-											label="Invert Y"
-											object={texture}
-											property="_invertY"
-											onChange={() => {
-												this._handleReloadTexture(texture);
-												this.props.onChange?.(texture);
-											}}
-										/>
+										{/* Only show Invert Y for non-procedural textures */}
+										{(() => {
+											const isProcedural = isProceduralTexture(texture);
+
+											if (!isProcedural) {
+												return (
+													<EditorInspectorSwitchField
+														noUndoRedo={this.props.noUndoRedo}
+														label="Invert Y"
+														object={texture}
+														property="_invertY"
+														onChange={() => {
+															this._handleReloadTexture(texture);
+															this.props.onChange?.(texture);
+														}}
+													/>
+												);
+											}
+											return null;
+										})()}
 									</>
 								)}
 
@@ -173,6 +202,11 @@ export class EditorInspectorTextureField extends Component<IEditorInspectorTextu
 	}
 
 	private _handleReloadTexture(texture: Texture | CubeTexture): void {
+		// Don't reload procedural textures - they don't have disk files
+		if (isProceduralTexture(texture)) {
+			return;
+		}
+
 		if (!projectConfiguration.path || !texture.url) {
 			return;
 		}
@@ -185,18 +219,23 @@ export class EditorInspectorTextureField extends Component<IEditorInspectorTextu
 	}
 
 	private _getPreviewComponent(textureUrl: false | string | null): ReactNode {
+		const texture = this.props.object[this.props.property];
+		const isProcedural = texture && isProceduralTexture(texture);
+
 		return (
-			<div className={`flex justify-center items-center ${textureUrl ? "w-24 h-24" : "w-8 h-8"} aspect-square`}>
-				{textureUrl && (
+			<div className={`flex justify-center items-center ${textureUrl || isProcedural ? "w-24 h-24" : "w-8 h-8"} aspect-square`}>
+				{(textureUrl || isProcedural) && (
 					<Popover>
 						<PopoverTrigger>
 							<>
-								{isCubeTexture(this.props.object[this.props.property]) ? (
+								{isCubeTexture(texture) ? (
 									<SiDotenv className="w-24 h-24" />
-								) : isColorGradingTexture(this.props.object[this.props.property]) ? (
+								) : isColorGradingTexture(texture) ? (
 									<IoIosColorPalette className="w-24 h-24" />
-								) : extname(textureUrl).toLowerCase() === ".exr" ? (
+								) : extname(textureUrl || "").toLowerCase() === ".exr" ? (
 									<EXRIcon size="96px" />
+								) : isProcedural ? (
+									<ProceduralTextureThumbnailRenderer absolutePath={texture.url ? join(dirname(projectConfiguration.path!), texture.url) : ""} />
 								) : this.state.previewTemporaryUrl ? (
 									<img className="w-24 h-24 object-contain" src={this.state.previewTemporaryUrl} />
 								) : (
@@ -206,9 +245,9 @@ export class EditorInspectorTextureField extends Component<IEditorInspectorTextu
 						</PopoverTrigger>
 						<PopoverContent side="left">
 							<>
-								{isCubeTexture(this.props.object[this.props.property])
+								{isCubeTexture(texture)
 									? this._getCubeTextureInspector()
-									: isColorGradingTexture(this.props.object[this.props.property])
+									: isColorGradingTexture(texture)
 										? this._getColorGradingTextureInspector()
 										: this._getTextureInspector()}
 							</>
@@ -216,7 +255,7 @@ export class EditorInspectorTextureField extends Component<IEditorInspectorTextu
 					</Popover>
 				)}
 
-				{!textureUrl && <MdOutlineQuestionMark className="w-8 h-8" />}
+				{!textureUrl && !isProcedural && <MdOutlineQuestionMark className="w-8 h-8" />}
 			</div>
 		);
 	}
@@ -311,6 +350,11 @@ export class EditorInspectorTextureField extends Component<IEditorInspectorTextu
 		const texture = this.props.object[this.props.property] as Texture;
 		if (!isTexture(texture)) {
 			return;
+		}
+
+		// Handle procedural textures specially
+		if (isProceduralTexture(texture)) {
+			return this._getProceduralTextureInspector(texture);
 		}
 
 		const o = {
@@ -485,15 +529,532 @@ export class EditorInspectorTextureField extends Component<IEditorInspectorTextu
 		);
 	}
 
+	private _getProceduralTextureInspector(texture: any): ReactNode {
+		// Determine the specific procedural texture type using the utility
+		const textureType = getProceduralTextureType(texture);
+
+		return (
+			<div className="flex flex-col gap-2 h-full">
+				<EditorInspectorSectionField title="Common">
+					<div className="flex justify-between items-center px-2 py-2">
+						<div className="w-1/2">Dimensions</div>
+
+						<div className="text-white/50 w-full text-end">
+							{texture.getSize().width}x{texture.getSize().height}
+						</div>
+					</div>
+					<div className="flex justify-between items-center px-2 py-2">
+						<div className="w-1/2">Type</div>
+						<div className="text-white/50 w-full text-end">{textureType}</div>
+					</div>
+					<EditorInspectorSwitchField
+						noUndoRedo={this.props.noUndoRedo}
+						label="Gamma Space"
+						object={texture}
+						property="gammaSpace"
+						onChange={() => this.props.onChange?.(texture)}
+					/>
+					<EditorInspectorSwitchField
+						noUndoRedo={this.props.noUndoRedo}
+						label="Get Alpha From RGB"
+						object={texture}
+						property="getAlphaFromRGB"
+						onChange={() => this.props.onChange?.(texture)}
+					/>
+				</EditorInspectorSectionField>
+
+				{/* Scale */}
+				<EditorInspectorSectionField title="Scale">
+					<EditorInspectorNumberField
+						noUndoRedo={this.props.noUndoRedo}
+						label="U Scale"
+						object={texture}
+						property="uScale"
+						onChange={() => this.forceUpdate()}
+						onFinishChange={() => this.props.onChange?.(texture)}
+					/>
+					<EditorInspectorNumberField
+						noUndoRedo={this.props.noUndoRedo}
+						label="V Scale"
+						object={texture}
+						property="vScale"
+						onChange={() => this.forceUpdate()}
+						onFinishChange={() => this.props.onChange?.(texture)}
+					/>
+				</EditorInspectorSectionField>
+
+				{/* Offset */}
+				<EditorInspectorSectionField title="Offset">
+					<EditorInspectorNumberField
+						noUndoRedo={this.props.noUndoRedo}
+						label="U Offset"
+						object={texture}
+						property="uOffset"
+						onFinishChange={() => this.props.onChange?.(texture)}
+					/>
+					<EditorInspectorNumberField
+						noUndoRedo={this.props.noUndoRedo}
+						label="V Offset"
+						object={texture}
+						property="vOffset"
+						onFinishChange={() => this.props.onChange?.(texture)}
+					/>
+				</EditorInspectorSectionField>
+
+				<EditorInspectorSectionField title="Wrap">
+					<EditorInspectorListField
+						noUndoRedo={this.props.noUndoRedo}
+						label="Wrap U"
+						object={texture}
+						property="wrapU"
+						onChange={() => this.props.onChange?.(texture)}
+						items={[
+							{ text: "Wrap", value: Texture.WRAP_ADDRESSMODE },
+							{ text: "Clamp", value: Texture.CLAMP_ADDRESSMODE },
+							{ text: "Mirror", value: Texture.MIRROR_ADDRESSMODE },
+						]}
+					/>
+					<EditorInspectorListField
+						noUndoRedo={this.props.noUndoRedo}
+						label="Wrap V"
+						object={texture}
+						property="wrapV"
+						onChange={() => this.props.onChange?.(texture)}
+						items={[
+							{ text: "Wrap", value: Texture.WRAP_ADDRESSMODE },
+							{ text: "Clamp", value: Texture.CLAMP_ADDRESSMODE },
+							{ text: "Mirror", value: Texture.MIRROR_ADDRESSMODE },
+						]}
+					/>
+					<EditorInspectorListField
+						noUndoRedo={this.props.noUndoRedo}
+						label="Wrap R"
+						object={texture}
+						property="wrapR"
+						onChange={() => this.props.onChange?.(texture)}
+						items={[
+							{ text: "Wrap", value: Texture.WRAP_ADDRESSMODE },
+							{ text: "Clamp", value: Texture.CLAMP_ADDRESSMODE },
+							{ text: "Mirror", value: Texture.MIRROR_ADDRESSMODE },
+						]}
+					/>
+				</EditorInspectorSectionField>
+
+				{/* Specific Procedural Texture Properties */}
+				{this._getSpecificProceduralTextureProperties(texture, textureType)}
+			</div>
+		);
+	}
+
+	private _getSpecificProceduralTextureProperties(texture: any, textureType: string): ReactNode {
+		// Gather all available properties dynamically using the utility
+		const availableProperties = gatherProperties(texture);
+
+		// If we have properties, show them in a dynamic way
+		if (availableProperties.length > 0) {
+			return (
+				<>
+					<EditorInspectorSectionField title="Texture Properties">
+						{availableProperties.map((prop) => {
+							if (prop.type === "color" || prop.name.toLowerCase().includes("color")) {
+								return (
+									<EditorInspectorColorField
+										key={prop.name}
+										noUndoRedo={this.props.noUndoRedo}
+										label={formatPropertyLabel(prop.name)}
+										object={texture}
+										property={prop.name}
+										onChange={() => this.forceUpdate()}
+										onFinishChange={() => {
+											updateTexture(texture);
+											this.props.onChange?.(texture);
+										}}
+									/>
+								);
+							} else if (prop.type === "number") {
+								return (
+									<EditorInspectorNumberField
+										key={prop.name}
+										noUndoRedo={this.props.noUndoRedo}
+										label={formatPropertyLabel(prop.name)}
+										object={texture}
+										property={prop.name}
+										step={getPropertyConfig(prop.name).step}
+										min={getPropertyConfig(prop.name).min}
+										max={getPropertyConfig(prop.name).max}
+										onChange={() => this.forceUpdate()}
+										onFinishChange={() => {
+											updateTexture(texture);
+											this.props.onChange?.(texture);
+										}}
+									/>
+								);
+							} else if (prop.type === "boolean") {
+								return (
+									<EditorInspectorSwitchField
+										key={prop.name}
+										noUndoRedo={this.props.noUndoRedo}
+										label={formatPropertyLabel(prop.name)}
+										object={texture}
+										property={prop.name}
+										onChange={() => {
+											updateTexture(texture);
+											this.props.onChange?.(texture);
+										}}
+									/>
+								);
+							} else if (prop.type === "string") {
+								return (
+									<div key={prop.name} className="flex justify-between items-center px-2 py-2">
+										<div className="w-1/2">{formatPropertyLabel(prop.name)}</div>
+										<div className="text-white/50 w-full text-end text-xs">{String(prop.value)}</div>
+									</div>
+								);
+							}
+							return null;
+						})}
+					</EditorInspectorSectionField>
+				</>
+			);
+		}
+
+		// Fallback to hardcoded properties for specific types
+		switch (textureType) {
+			case "WoodProceduralTexture":
+				return (
+					<EditorInspectorSectionField title="Wood Properties">
+						<EditorInspectorNumberField
+							noUndoRedo={this.props.noUndoRedo}
+							label="Amplitude Scale"
+							object={texture}
+							property="ampScale"
+							step={1}
+							min={1}
+							max={1000}
+							onChange={() => this.forceUpdate()}
+							onFinishChange={() => {
+								updateTexture(texture);
+								this.props.onChange?.(texture);
+							}}
+						/>
+						<EditorInspectorColorField
+							noUndoRedo={this.props.noUndoRedo}
+							label="Wood Color"
+							object={texture}
+							property="woodColor"
+							onChange={() => this.forceUpdate()}
+							onFinishChange={() => {
+								updateTexture(texture);
+								this.props.onChange?.(texture);
+							}}
+						/>
+					</EditorInspectorSectionField>
+				);
+
+			case "BrickProceduralTexture":
+				return (
+					<EditorInspectorSectionField title="Brick Properties">
+						<EditorInspectorColorField
+							noUndoRedo={this.props.noUndoRedo}
+							label="Brick Color"
+							object={texture}
+							property="brickColor"
+							onChange={() => this.forceUpdate()}
+							onFinishChange={() => {
+								updateTexture(texture);
+								this.props.onChange?.(texture);
+							}}
+						/>
+						<EditorInspectorColorField
+							noUndoRedo={this.props.noUndoRedo}
+							label="Joint Color"
+							object={texture}
+							property="jointColor"
+							onChange={() => this.forceUpdate()}
+							onFinishChange={() => {
+								updateTexture(texture);
+								this.props.onChange?.(texture);
+							}}
+						/>
+						<EditorInspectorNumberField
+							noUndoRedo={this.props.noUndoRedo}
+							label="Number of Bricks"
+							object={texture}
+							property="numberOfBricks"
+							step={1}
+							min={1}
+							max={100}
+							onChange={() => this.forceUpdate()}
+							onFinishChange={() => {
+								updateTexture(texture);
+								this.props.onChange?.(texture);
+							}}
+						/>
+					</EditorInspectorSectionField>
+				);
+
+			case "CloudProceduralTexture":
+				return (
+					<EditorInspectorSectionField title="Cloud Properties">
+						<EditorInspectorColorField
+							noUndoRedo={this.props.noUndoRedo}
+							label="Sky Color"
+							object={texture}
+							property="skyColor"
+							onChange={() => this.forceUpdate()}
+							onFinishChange={() => {
+								updateTexture(texture);
+								this.props.onChange?.(texture);
+							}}
+						/>
+						<EditorInspectorColorField
+							noUndoRedo={this.props.noUndoRedo}
+							label="Cloud Color"
+							object={texture}
+							property="cloudColor"
+							onChange={() => this.forceUpdate()}
+							onFinishChange={() => {
+								updateTexture(texture);
+								this.props.onChange?.(texture);
+							}}
+						/>
+					</EditorInspectorSectionField>
+				);
+
+			case "FireProceduralTexture":
+				return (
+					<EditorInspectorSectionField title="Fire Properties">
+						<EditorInspectorColorField
+							noUndoRedo={this.props.noUndoRedo}
+							label="Fire Color"
+							object={texture}
+							property="fireColor"
+							onChange={() => this.forceUpdate()}
+							onFinishChange={() => {
+								updateTexture(texture);
+								this.props.onChange?.(texture);
+							}}
+						/>
+						<EditorInspectorColorField
+							noUndoRedo={this.props.noUndoRedo}
+							label="Smoke Color"
+							object={texture}
+							property="smokeColor"
+							onChange={() => this.forceUpdate()}
+							onFinishChange={() => {
+								updateTexture(texture);
+								this.props.onChange?.(texture);
+							}}
+						/>
+						<EditorInspectorNumberField
+							noUndoRedo={this.props.noUndoRedo}
+							label="Speed"
+							object={texture}
+							property="speed"
+							step={0.1}
+							min={0}
+							max={10}
+							onChange={() => this.forceUpdate()}
+							onFinishChange={() => {
+								updateTexture(texture);
+								this.props.onChange?.(texture);
+							}}
+						/>
+					</EditorInspectorSectionField>
+				);
+
+			case "GrassProceduralTexture":
+				return (
+					<EditorInspectorSectionField title="Grass Properties">
+						<EditorInspectorColorField
+							noUndoRedo={this.props.noUndoRedo}
+							label="Grass Color"
+							object={texture}
+							property="grassColors"
+							onChange={() => this.forceUpdate()}
+							onFinishChange={() => {
+								updateTexture(texture);
+								this.props.onChange?.(texture);
+							}}
+						/>
+						<EditorInspectorColorField
+							noUndoRedo={this.props.noUndoRedo}
+							label="Ground Color"
+							object={texture}
+							property="groundColor"
+							onChange={() => this.forceUpdate()}
+							onFinishChange={() => {
+								updateTexture(texture);
+								this.props.onChange?.(texture);
+							}}
+						/>
+					</EditorInspectorSectionField>
+				);
+
+			case "MarbleProceduralTexture":
+				return (
+					<EditorInspectorSectionField title="Marble Properties">
+						<EditorInspectorColorField
+							noUndoRedo={this.props.noUndoRedo}
+							label="Marble Color"
+							object={texture}
+							property="marbleColor"
+							onChange={() => this.forceUpdate()}
+							onFinishChange={() => {
+								updateTexture(texture);
+								this.props.onChange?.(texture);
+							}}
+						/>
+						<EditorInspectorColorField
+							noUndoRedo={this.props.noUndoRedo}
+							label="Vein Color"
+							object={texture}
+							property="veinColor"
+							onChange={() => this.forceUpdate()}
+							onFinishChange={() => {
+								updateTexture(texture);
+								this.props.onChange?.(texture);
+							}}
+						/>
+						<EditorInspectorNumberField
+							noUndoRedo={this.props.noUndoRedo}
+							label="Vein Scale"
+							object={texture}
+							property="veinScale"
+							step={0.1}
+							min={0}
+							max={10}
+							onChange={() => this.forceUpdate()}
+							onFinishChange={() => {
+								updateTexture(texture);
+								this.props.onChange?.(texture);
+							}}
+						/>
+					</EditorInspectorSectionField>
+				);
+
+			case "RoadProceduralTexture":
+				return (
+					<EditorInspectorSectionField title="Road Properties">
+						<EditorInspectorColorField
+							noUndoRedo={this.props.noUndoRedo}
+							label="Road Color"
+							object={texture}
+							property="roadColor"
+							onChange={() => this.forceUpdate()}
+							onFinishChange={() => {
+								updateTexture(texture);
+								this.props.onChange?.(texture);
+							}}
+						/>
+						<EditorInspectorColorField
+							noUndoRedo={this.props.noUndoRedo}
+							label="Line Color"
+							object={texture}
+							property="lineColor"
+							onChange={() => this.forceUpdate()}
+							onFinishChange={() => {
+								updateTexture(texture);
+								this.props.onChange?.(texture);
+							}}
+						/>
+					</EditorInspectorSectionField>
+				);
+
+			case "StarfieldProceduralTexture":
+				return (
+					<EditorInspectorSectionField title="Starfield Properties">
+						<EditorInspectorColorField
+							noUndoRedo={this.props.noUndoRedo}
+							label="Starfield Color"
+							object={texture}
+							property="starfieldColor"
+							onChange={() => this.forceUpdate()}
+							onFinishChange={() => {
+								updateTexture(texture);
+								this.props.onChange?.(texture);
+							}}
+						/>
+						<EditorInspectorNumberField
+							noUndoRedo={this.props.noUndoRedo}
+							label="Number of Stars"
+							object={texture}
+							property="numberOfStars"
+							step={1}
+							min={1}
+							max={1000}
+							onChange={() => this.forceUpdate()}
+							onFinishChange={() => {
+								updateTexture(texture);
+								this.props.onChange?.(texture);
+							}}
+						/>
+					</EditorInspectorSectionField>
+				);
+
+			case "PerlinNoiseProceduralTexture":
+				return (
+					<EditorInspectorSectionField title="Noise Properties">
+						<EditorInspectorNumberField
+							noUndoRedo={this.props.noUndoRedo}
+							label="Noise Scale"
+							object={texture}
+							property="noiseScale"
+							step={0.1}
+							min={0}
+							max={10}
+							onChange={() => this.forceUpdate()}
+							onFinishChange={() => {
+								updateTexture(texture);
+								this.props.onChange?.(texture);
+							}}
+						/>
+						<EditorInspectorNumberField
+							noUndoRedo={this.props.noUndoRedo}
+							label="Octaves"
+							object={texture}
+							property="octaves"
+							step={1}
+							min={1}
+							max={10}
+							onChange={() => this.forceUpdate()}
+							onFinishChange={() => {
+								updateTexture(texture);
+								this.props.onChange?.(texture);
+							}}
+						/>
+					</EditorInspectorSectionField>
+				);
+
+			default:
+				return null;
+		}
+	}
+
 	private async _computeTemporaryPreview(): Promise<void> {
 		const texture = this.props.object[this.props.property] as Texture;
-		if (!isTexture(texture) || !texture.url || extname(texture.url).toLowerCase() === ".exr") {
+		if (!isTexture(texture)) {
 			return;
 		}
 
-		const path = join(dirname(projectConfiguration.path!), texture.url);
+		// Check if this is a procedural texture by checking the URL extension
+		const isProceduralTexture = texture.url && texture.url.endsWith(".proceduraltexture");
+		console.log("Texture URL:", texture.url, "isProcedural:", isProceduralTexture);
 
-		const buffer = await sharp(path).resize(128, 128).toBuffer();
+		let buffer: Buffer;
+
+		if (isProceduralTexture) {
+			// For procedural textures, create the preview directly using the stored type information
+			// This ensures we create the correct procedural texture type
+			buffer = await this._createProceduralTexturePreview(texture);
+		} else if (texture.url && extname(texture.url).toLowerCase() !== ".exr") {
+			// For file-based textures, use sharp to resize
+			const path = join(dirname(projectConfiguration.path!), texture.url);
+			buffer = await sharp(path).resize(TEXTURE_WIDTH, TEXTURE_HEIGHT).toBuffer();
+		} else {
+			// Skip preview generation for unsupported formats
+			return;
+		}
 
 		if (this.state.previewTemporaryUrl) {
 			URL.revokeObjectURL(this.state.previewTemporaryUrl);
@@ -502,6 +1063,185 @@ export class EditorInspectorTextureField extends Component<IEditorInspectorTextu
 		this.setState({
 			previewTemporaryUrl: URL.createObjectURL(new Blob([buffer])),
 		});
+	}
+
+	private async _createProceduralTexturePreview(texture: Texture): Promise<Buffer> {
+		// Create a procedural texture preview using the stored type information
+		// This ensures we create the correct procedural texture type
+		const textureType = (texture as any)._proceduralTextureType;
+		console.log("Creating procedural texture preview for type:", textureType);
+
+		if (!textureType) {
+			console.warn("No texture type information found, using fallback");
+			return this._createFallbackPreview();
+		}
+
+		try {
+			// Create a canvas element for rendering
+			const canvas = document.createElement("canvas");
+			canvas.width = TEXTURE_WIDTH;
+			canvas.height = TEXTURE_HEIGHT;
+
+			// Import Babylon.js dynamically
+			const { Engine, Scene, CreateBox, Vector3, UniversalCamera, StandardMaterial, Color3 } = await import("babylonjs");
+
+			// Create engine
+			const engine = new Engine(canvas, true, {
+				antialias: true,
+				audioEngine: false,
+				adaptToDeviceRatio: true,
+				preserveDrawingBuffer: true,
+				premultipliedAlpha: false,
+			});
+
+			const scene = new Scene(engine);
+			scene.clearColor.set(0, 0, 0, 0);
+
+			// Create camera positioned to view the box from above
+			const camera = new UniversalCamera("UniversalCamera", new Vector3(0, 5, 0), scene);
+			camera.fov = 0.8;
+			camera.minZ = 0.1;
+
+			// Create a box that will display the texture
+			const box = CreateBox("box", { width: 4, height: 4, depth: 4 }, scene);
+			box.position.z = 0;
+
+			// Set camera to look at the box center
+			camera.setTarget(box.position);
+
+			// Create material with white diffuse/emissive for better texture visibility
+			const material = new StandardMaterial("proceduralTextureMaterial", scene);
+			material.diffuseColor = new Color3(1, 1, 1);
+			material.emissiveColor = new Color3(1, 1, 1);
+
+			// Create the procedural texture based on the stored type
+			let proceduralTexture;
+
+			if (textureType.includes("Wood")) {
+				const { WoodProceduralTexture } = await import("babylonjs-procedural-textures");
+				proceduralTexture = new WoodProceduralTexture("woodTexture", TEXTURE_WIDTH, scene);
+			} else if (textureType.includes("Brick")) {
+				const { BrickProceduralTexture } = await import("babylonjs-procedural-textures");
+				proceduralTexture = new BrickProceduralTexture("brickTexture", TEXTURE_WIDTH, scene);
+			} else if (textureType.includes("Cloud")) {
+				const { CloudProceduralTexture } = await import("babylonjs-procedural-textures");
+				proceduralTexture = new CloudProceduralTexture("cloudTexture", TEXTURE_WIDTH, scene);
+			} else if (textureType.includes("Fire")) {
+				const { FireProceduralTexture } = await import("babylonjs-procedural-textures");
+				proceduralTexture = new FireProceduralTexture("fireTexture", TEXTURE_WIDTH, scene);
+			} else if (textureType.includes("Grass")) {
+				const { GrassProceduralTexture } = await import("babylonjs-procedural-textures");
+				proceduralTexture = new GrassProceduralTexture("grassTexture", TEXTURE_WIDTH, scene);
+			} else if (textureType.includes("Marble")) {
+				const { MarbleProceduralTexture } = await import("babylonjs-procedural-textures");
+				proceduralTexture = new MarbleProceduralTexture("marbleTexture", TEXTURE_WIDTH, scene);
+			} else if (textureType.includes("Road")) {
+				const { RoadProceduralTexture } = await import("babylonjs-procedural-textures");
+				proceduralTexture = new RoadProceduralTexture("roadTexture", TEXTURE_WIDTH, scene);
+			} else if (textureType.includes("Starfield")) {
+				const { StarfieldProceduralTexture } = await import("babylonjs-procedural-textures");
+				proceduralTexture = new StarfieldProceduralTexture("starfieldTexture", TEXTURE_WIDTH, scene);
+			} else if (textureType.includes("PerlinNoise")) {
+				const { PerlinNoiseProceduralTexture } = await import("babylonjs-procedural-textures");
+				proceduralTexture = new PerlinNoiseProceduralTexture("noiseTexture", TEXTURE_WIDTH, scene);
+			} else {
+				// Default to noise texture for any other type
+				const { PerlinNoiseProceduralTexture } = await import("babylonjs-procedural-textures");
+				proceduralTexture = new PerlinNoiseProceduralTexture("defaultTexture", TEXTURE_WIDTH, scene);
+			}
+
+			// Apply the procedural texture to the material
+			if (proceduralTexture) {
+				material.diffuseTexture = proceduralTexture;
+				box.material = material;
+			}
+
+			// Start rendering
+			engine.runRenderLoop(() => {
+				scene.render();
+			});
+
+			// Wait for the texture to render, then capture the result
+			return new Promise((resolve, reject) => {
+				setTimeout(() => {
+					try {
+						// Convert canvas to blob, then to buffer
+						canvas.toBlob(async (blob) => {
+							if (blob) {
+								const arrayBuffer = await blob.arrayBuffer();
+								const buffer = Buffer.from(arrayBuffer);
+
+								// Cleanup
+								engine.stopRenderLoop();
+								scene.dispose();
+								engine.dispose();
+
+								resolve(buffer);
+							} else {
+								reject(new Error("Failed to create blob from canvas"));
+							}
+						}, "image/png");
+					} catch (e) {
+						// Cleanup on error
+						engine.stopRenderLoop();
+						scene.dispose();
+						engine.dispose();
+						reject(e);
+					}
+				}, 500); // Wait 500ms for rendering
+			});
+		} catch (error) {
+			console.warn("Failed to create procedural texture preview:", error);
+			return this._createFallbackPreview();
+		}
+	}
+
+	private _createFallbackPreview(): Buffer {
+		// Create a simple fallback preview when procedural texture creation fails
+		const canvas = document.createElement("canvas");
+		canvas.width = TEXTURE_WIDTH;
+		canvas.height = TEXTURE_HEIGHT;
+
+		const ctx = canvas.getContext("2d");
+		if (!ctx) {
+			return Buffer.from([]);
+		}
+
+		// Create a simple procedural-like pattern
+		ctx.fillStyle = "#4a90e2"; // Blue background
+		ctx.fillRect(0, 0, TEXTURE_WIDTH, TEXTURE_HEIGHT);
+
+		// Add some procedural-like elements
+		ctx.fillStyle = "#ffffff";
+		ctx.globalAlpha = 0.3;
+
+		// Create a simple noise-like pattern
+		for (let i = 0; i < 100; i++) {
+			const x = Math.random() * TEXTURE_WIDTH;
+			const y = Math.random() * TEXTURE_HEIGHT;
+			const size = Math.random() * 4 + 1;
+			ctx.beginPath();
+			ctx.arc(x, y, size, 0, Math.PI * 2);
+			ctx.fill();
+		}
+
+		// Add text label
+		ctx.globalAlpha = 1;
+		ctx.fillStyle = "#ffffff";
+		ctx.font = "12px Arial";
+		ctx.textAlign = "center";
+		ctx.fillText("Procedural", TEXTURE_WIDTH / 2, TEXTURE_HEIGHT / 2);
+		ctx.fillText("Texture", TEXTURE_WIDTH / 2, TEXTURE_HEIGHT / 2 + 16);
+
+		// Convert canvas to buffer
+		try {
+			const dataURL = canvas.toDataURL("image/png");
+			const base64Data = dataURL.replace(/^data:image\/png;base64,/, "");
+			return Buffer.from(base64Data, "base64");
+		} catch (e) {
+			console.warn("Failed to create fallback preview:", e);
+			return Buffer.from([]);
+		}
 	}
 
 	private _handleDragOver(ev: DragEvent<HTMLDivElement>): void {
@@ -514,7 +1254,7 @@ export class EditorInspectorTextureField extends Component<IEditorInspectorTextu
 		this.setState({ dragOver: false });
 	}
 
-	private _handleDrop(ev: DragEvent<HTMLDivElement>): void {
+	private async _handleDrop(ev: DragEvent<HTMLDivElement>): Promise<void> {
 		ev.preventDefault();
 		this.setState({ dragOver: false });
 
@@ -528,28 +1268,30 @@ export class EditorInspectorTextureField extends Component<IEditorInspectorTextu
 			case ".jpeg":
 			case ".bmp":
 			case ".exr":
-				const oldTexture = this.props.object[this.props.property];
-				const newTexture = configureImportedTexture(
-					new Texture(absolutePath, this.props.scene ?? (isScene(this.props.object) ? this.props.object : this.props.object.getScene()))
-				);
+				{
+					const oldTexture = this.props.object[this.props.property];
+					const newTexture = configureImportedTexture(
+						new Texture(absolutePath, this.props.scene ?? (isScene(this.props.object) ? this.props.object : this.props.object.getScene()))
+					);
 
-				if (oldTexture !== newTexture) {
-					this.props.object[this.props.property] = newTexture;
-					this.props.onChange?.(newTexture);
+					if (oldTexture !== newTexture) {
+						this.props.object[this.props.property] = newTexture;
+						this.props.onChange?.(newTexture);
 
-					if (!this.props.noUndoRedo) {
-						registerUndoRedo({
-							executeRedo: true,
-							undo: () => (this.props.object[this.props.property] = oldTexture),
-							redo: () => (this.props.object[this.props.property] = newTexture),
-							onLost: () => newTexture?.dispose(),
-						});
+						if (!this.props.noUndoRedo) {
+							registerUndoRedo({
+								executeRedo: true,
+								undo: () => (this.props.object[this.props.property] = oldTexture),
+								redo: () => (this.props.object[this.props.property] = newTexture),
+								onLost: () => newTexture?.dispose(),
+							});
+						}
+
+						onTextureAddedObservable.notifyObservers(newTexture);
 					}
 
-					onTextureAddedObservable.notifyObservers(newTexture);
+					this._computeTemporaryPreview();
 				}
-
-				this._computeTemporaryPreview();
 				break;
 
 			case ".3dl":
@@ -610,6 +1352,76 @@ export class EditorInspectorTextureField extends Component<IEditorInspectorTextu
 							},
 							onLost: () => newTexture?.dispose(),
 						});
+					}
+				}
+				break;
+
+			case ".proceduraltexture":
+				{
+					let config: any = {};
+					try {
+						config = await readJSON(absolutePath);
+					} catch (e) {
+						config = {};
+					}
+
+					const scene = this.props.scene ?? (isScene(this.props.object) ? this.props.object : this.props.object.getScene());
+					const oldTexture = this.props.object[this.props.property];
+
+					const fileNameWithExt = absolutePath.split("/").pop() || "";
+					const baseName = fileNameWithExt.replace(extname(absolutePath), "");
+					const size = config.size ?? 512;
+
+					// Get the correct procedural texture class based on config
+					const textureType = config.customType || "BABYLON.PerlinNoiseProceduralTexture";
+					const className = textureType.split(".").pop(); // Extract class name from "BABYLON.ClassName"
+
+					// Import procedural textures module
+					const proceduralTextures = await import("babylonjs-procedural-textures");
+					const ProceduralTextureClass = (proceduralTextures as any)[className];
+
+					if (!ProceduralTextureClass) {
+						console.warn(`${className} class not found in babylonjs-procedural-textures.`);
+						break;
+					}
+
+					const newTexture = new ProceduralTextureClass(baseName, size, scene) as Texture;
+
+					console.log("Created procedural texture:", newTexture);
+					console.log("Texture constructor:", newTexture.constructor);
+					console.log("Texture constructor name:", newTexture.constructor?.name);
+					console.log("Texture getClassName:", newTexture.getClassName);
+					console.log("Texture getClassName result:", newTexture.getClassName());
+					console.log("Texture instanceof check:", newTexture instanceof ProceduralTextureClass);
+					console.log("ProceduralTextureClass:", ProceduralTextureClass);
+
+					newTexture.uniqueId = UniqueNumber.Get();
+
+					const projectDir = join(dirname(projectConfiguration.path!), "/");
+					const relativePath = absolutePath.replace(projectDir, "");
+					newTexture.name = relativePath;
+					newTexture.url = relativePath;
+
+					if (oldTexture !== newTexture) {
+						this.props.object[this.props.property] = newTexture;
+						this.props.onChange?.(newTexture);
+
+						if (!this.props.noUndoRedo) {
+							registerUndoRedo({
+								executeRedo: true,
+								undo: () => (this.props.object[this.props.property] = oldTexture),
+								redo: () => (this.props.object[this.props.property] = newTexture),
+								onLost: () => newTexture?.dispose(),
+							});
+						}
+
+						onTextureAddedObservable.notifyObservers(newTexture);
+
+						// Store the texture type information for preview generation
+						(newTexture as any)._proceduralTextureType = className;
+
+						// Generate preview for procedural texture
+						this._computeTemporaryPreview();
 					}
 				}
 				break;
