@@ -17,6 +17,7 @@ import { EditorConsole } from "./layout/console";
 import { EditorInspector } from "./layout/inspector";
 import { EditorAnimation } from "./layout/animation";
 import { EditorAssetsBrowser } from "./layout/assets-browser";
+import { EditorWebXRSimulator } from "./layout/webxr-simulator";
 
 export interface IEditorLayoutProps {
 	/**
@@ -50,6 +51,10 @@ export class EditorLayout extends Component<IEditorLayoutProps> {
 	 * The animation editor of the editor.
 	 */
 	public animations: EditorAnimation;
+	/**
+	 * The WebXR simulator panel.
+	 */
+	public webxrSimulator: EditorWebXRSimulator;
 
 	private _layoutRef: Layout | null = null;
 	private _model: Model = Model.fromJson(layoutModel as any);
@@ -60,6 +65,7 @@ export class EditorLayout extends Component<IEditorLayoutProps> {
 		graph: <EditorGraph editor={this.props.editor} ref={(r) => (this.graph = r!)} />,
 		"assets-browser": <EditorAssetsBrowser editor={this.props.editor} ref={(r) => (this.assets = r!)} />,
 		animations: <EditorAnimation editor={this.props.editor} ref={(r) => (this.animations = r!)} />,
+		"webxr-simulator": <EditorWebXRSimulator editor={this.props.editor} ref={(r) => (this.webxrSimulator = r!)} />,
 	};
 
 	private _layoutVersion: string = "5.0.0-alpha.2";
