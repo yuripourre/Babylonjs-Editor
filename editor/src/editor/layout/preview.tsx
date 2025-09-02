@@ -20,6 +20,8 @@ import {
 	CubicEase,
 	EasingFunction,
 	Engine,
+	FreeCamera,
+	Quaternion,
 	GizmoCoordinatesMode,
 	ISceneLoaderAsyncResult,
 	Node,
@@ -163,6 +165,14 @@ export class EditorPreview extends Component<IEditorPreviewProps, IEditorPreview
 	 * This is used to display the FPS and other values.
 	 */
 	public statistics: Stats;
+
+	/**
+	 * Preview XR session (simulated)
+	 */
+	private _previewXRSession: any = null;
+	private _previewXRLeftCamera: FreeCamera | null = null;
+	private _previewXRRightCamera: FreeCamera | null = null;
+	private _previewXRFrameRequestId: number | null = null;
 
 	private _renderScene: boolean = true;
 	private _mouseDownPosition: Vector2 = Vector2.Zero();
@@ -744,6 +754,15 @@ export class EditorPreview extends Component<IEditorPreviewProps, IEditorPreview
 					{!this.play?.state.playing && this._getEditToolbar()}
 
 					<div className="flex gap-2 items-center h-10">
+						<Button
+							variant="ghost"
+							className="px-2 py-1 w-10 h-9"
+							onClick={() => this._togglePreviewXR()}
+							disabled={!((window as any).navigator?.xr)}
+						>
+							VR
+						</Button>
+
 						<EditorPreviewPlayComponent editor={this.props.editor} ref={(r) => (this.play = r!)} onRestart={() => this.play.restart()} />
 					</div>
 				</div>
@@ -1172,4 +1191,119 @@ export class EditorPreview extends Component<IEditorPreviewProps, IEditorPreview
 			}
 		});
 	}
+
+	private async _startPreviewXR(): Promise<void> {
+		if (!this.scene) {
+			return;
+		}
+
+		try {
+			const xr: any = (window as any).navigator?.xr;
+			if (!xr) {
+				return;
+			}
+
+			const session = await xr.requestSession("immersive-vr");
+			this._previewXRSession = session;
+
+			session.addEventListener("end", () => {
+				this._stopPreviewXR();
+			});
+
+			// create two cameras for stereo
+			this._previewXRLeftCamera = new FreeCamera("preview_xr_left", new Vector3(0, 1.6, 0), this.scene);
+			this._previewXRRightCamera = new FreeCamera("preview_xr_right", new Vector3(0, 1.6, 0), this.scene);
+
+			this._previewXRLeftCamera.minZ = 0.01;
+			this._previewXRRightCamera.minZ = 0.01;
+
+			this._previewXRLeftCamera.viewport = new Viewport(0, 0, 0.5, 1);
+			this._previewXRRightCamera.viewport = new Viewport(0.5, 0, 0.5, 1);
+
+			this.scene.activeCameras = [this._previewXRLeftCamera, this._previewXRRightCamera];
+			this.scene.activeCamera = this._previewXRLeftCamera;
+			this.scene.cameraToUseForPointers = this._previewXRLeftCamera;
+
+			const loop = (_time: number, frame: any) => {
+				try {
+					const pose = frame.getViewerPose(null);
+					if (pose && pose.views && pose.views.length > 0) {
+						const left = pose.views[0];
+						const right = pose.views.length > 1 ? pose.views[1] : pose.views[0];
+
+						if (this._previewXRLeftCamera && left.transform) {
+							const p = left.transform.position;
+							const o = left.transform.orientation;
+							this._previewXRLeftCamera.position = new Vector3(p.x, p.y, p.z);
+							this._previewXRLeftCamera.rotationQuaternion = new Quaternion(o.x, o.y, o.z, o.w);
+						}
+
+						if (this._previewXRRightCamera && right.transform) {
+							const p = right.transform.position;
+							const o = right.transform.orientation;
+							this._previewXRRightCamera.position = new Vector3(p.x, p.y, p.z);
+							this._previewXRRightCamera.rotationQuaternion = new Quaternion(o.x, o.y, o.z, o.w);
+						}
+					}
+				} catch (e) {
+					// swallow
+				}
+
+				if (this._previewXRSession) {
+					this._previewXRFrameRequestId = this._previewXRSession.requestAnimationFrame(loop);
+				}
+			};
+
+			this._previewXRFrameRequestId = session.requestAnimationFrame(loop);
+		} catch (e) {
+			console.error("Failed to start preview XR session", e);
+		}
+	}
+
+	private async _stopPreviewXR(): Promise<void> {
+		try {
+			if (this._previewXRFrameRequestId !== null && this._previewXRSession && this._previewXRSession.cancelAnimationFrame) {
+				this._previewXRSession.cancelAnimationFrame(this._previewXRFrameRequestId);
+			}
+
+			if (this._previewXRSession && this._previewXRSession.end) {
+				await this._previewXRSession.end();
+			}
+		} catch (e) {
+			// ignore
+		}
+
+		try {
+			if (this._previewXRLeftCamera) {
+				this._previewXRLeftCamera.dispose();
+				this._previewXRLeftCamera = null;
+			}
+			if (this._previewXRRightCamera) {
+				this._previewXRRightCamera.dispose();
+				this._previewXRRightCamera = null;
+			}
+		} catch (e) {
+			// ignore
+		}
+
+		if (this.scene) {
+			// restore single camera (editor camera)
+			if (this.camera) {
+				this.scene.activeCameras = null;
+				this.scene.activeCamera = this.camera;
+				this.scene.cameraToUseForPointers = this.camera;
+			}
+		}
+
+		this._previewXRSession = null;
+		this._previewXRFrameRequestId = null;
+	}
+
+	private _togglePreviewXR = async () => {
+		if (this._previewXRSession) {
+			await this._stopPreviewXR();
+		} else {
+			await this._startPreviewXR();
+		}
+	};
 }
