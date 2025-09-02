@@ -205,6 +205,15 @@ export class EditorPreview extends Component<IEditorPreviewProps, IEditorPreview
 		ipcRenderer.on("preview:edit-camera", () => this.props.editor.layout.inspector.setEditedObject(this.props.editor.layout.preview.scene.activeCamera));
 
 		onTextureAddedObservable.add(() => checkProjectCachedCompressedTextures(props.editor));
+
+		// re-render when the simulated WebXR polyfill is toggled so Preview/UI can re-check availability
+		window.addEventListener("webxr-polyfill-changed", () => {
+			try {
+				this.forceUpdate();
+			} catch (e) {
+				// ignore
+			}
+		});
 	}
 
 	public render(): ReactNode {

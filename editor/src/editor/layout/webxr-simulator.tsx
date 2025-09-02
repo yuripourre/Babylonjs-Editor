@@ -20,6 +20,8 @@ import {
     Nullable,
 } from "babylonjs";
 
+import { installSimulatedWebXR, ISimulatedGamepad } from "../../tools/webxr/polyfill";
+
 export interface IEditorWebXRSimulatorProps {
     editor: Editor;
 }
@@ -59,8 +61,13 @@ export class EditorWebXRSimulator extends Component<IEditorWebXRSimulatorProps, 
     private _leftCamera: Nullable<FreeCamera> = null;
     private _rightCamera: Nullable<FreeCamera> = null;
 
-    private _originalNavigatorXR: any = undefined;
     private _simulatedSession: any = null;
+
+    // Simulation helpers
+    private _uninstallPolyfill: (() => void) | null = null;
+
+    private _leftGamepad: ISimulatedGamepad = { axes: [0, 0], buttons: [{ pressed: false, value: 0 }] };
+    private _rightGamepad: ISimulatedGamepad = { axes: [0, 0], buttons: [{ pressed: false, value: 0 }] };
 
     public constructor(props: IEditorWebXRSimulatorProps) {
         super(props);
@@ -80,11 +87,7 @@ export class EditorWebXRSimulator extends Component<IEditorWebXRSimulatorProps, 
                             Enable VR
                         </Toggle>
 
-                        <Button
-                            variant="ghost"
-                            className="!px-2 !py-2"
-                            onClick={() => this._toggleImmersiveMode()}
-                        >
+                        <Button variant="ghost" className="!px-2 !py-2" onClick={() => this._toggleImmersiveMode()}>
                             {this.state.immersive ? "Exit VR" : "Enter VR"}
                         </Button>
 
@@ -93,6 +96,55 @@ export class EditorWebXRSimulator extends Component<IEditorWebXRSimulatorProps, 
                 </div>
 
                 <canvas ref={(r) => this._onGotCanvasRef(r!)} className="w-full h-full select-none" />
+
+                {/* Controller emulation UI */}
+                <div className="absolute top-12 right-2 z-50 w-72 p-2 rounded bg-background/80 backdrop-blur">
+                    <div className="text-sm font-bold mb-1">Left Controller</div>
+                    <div className="flex flex-col gap-1">
+                        <label className="text-xs">Trigger ({this._leftGamepad.buttons[0].value.toFixed(2)})</label>
+                        <input
+                            type="range"
+                            min="0"
+                            max="1"
+                            step="0.01"
+                            value={this._leftGamepad.buttons[0].value}
+                            onChange={(e) => this._setLeftTrigger(parseFloat(e.target.value))}
+                        />
+                        <label className="text-xs">Thumb X ({this._leftGamepad.axes[0].toFixed(2)})</label>
+                        <input type="range" min="-1" max="1" step="0.01" value={this._leftGamepad.axes[0]} onChange={(e) => this._setLeftThumbX(parseFloat(e.target.value))} />
+                        <label className="text-xs">Thumb Y ({this._leftGamepad.axes[1].toFixed(2)})</label>
+                        <input type="range" min="-1" max="1" step="0.01" value={this._leftGamepad.axes[1]} onChange={(e) => this._setLeftThumbY(parseFloat(e.target.value))} />
+                        <div className="flex gap-2">
+                            <button className="btn" onClick={() => this._toggleLeftButton(1)}>
+                                {this._leftGamepad.buttons[1]?.pressed ? "A: Pressed" : "A: Off"}
+                            </button>
+                        </div>
+                    </div>
+
+                    <div className="h-1" />
+
+                    <div className="text-sm font-bold mb-1">Right Controller</div>
+                    <div className="flex flex-col gap-1">
+                        <label className="text-xs">Trigger ({this._rightGamepad.buttons[0].value.toFixed(2)})</label>
+                        <input
+                            type="range"
+                            min="0"
+                            max="1"
+                            step="0.01"
+                            value={this._rightGamepad.buttons[0].value}
+                            onChange={(e) => this._setRightTrigger(parseFloat(e.target.value))}
+                        />
+                        <label className="text-xs">Thumb X ({this._rightGamepad.axes[0].toFixed(2)})</label>
+                        <input type="range" min="-1" max="1" step="0.01" value={this._rightGamepad.axes[0]} onChange={(e) => this._setRightThumbX(parseFloat(e.target.value))} />
+                        <label className="text-xs">Thumb Y ({this._rightGamepad.axes[1].toFixed(2)})</label>
+                        <input type="range" min="-1" max="1" step="0.01" value={this._rightGamepad.axes[1]} onChange={(e) => this._setRightThumbY(parseFloat(e.target.value))} />
+                        <div className="flex gap-2">
+                            <button className="btn" onClick={() => this._toggleRightButton(1)}>
+                                {this._rightGamepad.buttons[1]?.pressed ? "A: Pressed" : "A: Off"}
+                            </button>
+                        </div>
+                    </div>
+                </div>
             </div>
         );
     }
@@ -107,7 +159,6 @@ export class EditorWebXRSimulator extends Component<IEditorWebXRSimulatorProps, 
             return;
         }
 
-        // no longer storing canvas reference; it's only used to create the engine
         this._engine = new Engine(canvas, true, {
             antialias: true,
             audioEngine: false,
@@ -189,7 +240,6 @@ export class EditorWebXRSimulator extends Component<IEditorWebXRSimulatorProps, 
                 return;
             }
             const pick = this._scene.pick(ev.offsetX, ev.offsetY, (m) => m === ground);
-            // If picking the ground failed, fallback to any pick plane
             const finalPick = pick && pick.hit && pick.pickedPoint ? pick : this._scene.pick(ev.offsetX, ev.offsetY);
             if (finalPick && finalPick.hit && finalPick.pickedPoint) {
                 this._selectedMesh.position = finalPick.pickedPoint.subtract(this._dragOffset);
@@ -201,21 +251,21 @@ export class EditorWebXRSimulator extends Component<IEditorWebXRSimulatorProps, 
             this._selectedMesh = null;
         });
 
-        // Make sure gestures do not select text
         canvas.addEventListener("contextmenu", (e) => {
             e.preventDefault();
         });
 
-        // expose internal pose for the polyfill
-        (window as any).__webxrSimulator = {
-            getPose: () => this._getHeadPosePlain(),
-        };
-
         this.forceUpdate();
     }
 
+    private _rotateVecByQuat(v: Vector3, q: Quaternion): Vector3 {
+        const qv = new Vector3(q.x, q.y, q.z);
+        const t = Vector3.Cross(qv, v).scale(2);
+        const result = v.add(t.scale(q.w)).add(Vector3.Cross(qv, t));
+        return result;
+    }
+
     private _getHeadPosePlain() {
-        // returns a plain object describing headset pose
         if (!this._headset) {
             return {
                 position: { x: 0, y: 1.6, z: 0 },
@@ -241,10 +291,15 @@ export class EditorWebXRSimulator extends Component<IEditorWebXRSimulatorProps, 
         const headPos = this._headset.absolutePosition || new Vector3(0, 1.6, 0);
         const headRot = (this._headset.rotationQuaternion as Quaternion) || new Quaternion(0, 0, 0, 1);
 
-        // naive offset along world X axis then rotate by headset orientation (approximation)
-        // For simplicity we simply offset in world space; this is enough for a basic simulator.
-        const leftPos = headPos.add(new Vector3(-ipd / 2, 0, 0));
-        const rightPos = headPos.add(new Vector3(ipd / 2, 0, 0));
+        // IPD offset in local space, rotated by headset orientation for realistic stereo
+        const leftLocal = new Vector3(-ipd / 2, 0, 0);
+        const rightLocal = new Vector3(ipd / 2, 0, 0);
+
+        const leftOffset = this._rotateVecByQuat(leftLocal, headRot);
+        const rightOffset = this._rotateVecByQuat(rightLocal, headRot);
+
+        const leftPos = headPos.add(leftOffset);
+        const rightPos = headPos.add(rightOffset);
 
         this._leftCamera.position = leftPos;
         this._rightCamera.position = rightPos;
@@ -258,7 +313,7 @@ export class EditorWebXRSimulator extends Component<IEditorWebXRSimulatorProps, 
 
         this._scene.activeCameras = [this._leftCamera, this._rightCamera];
         this._scene.activeCamera = this._leftCamera as any;
-        this._scene.cameraToUseForPointers = this._leftCamera as any; // to keep interactions functional
+        this._scene.cameraToUseForPointers = this._leftCamera as any;
     }
 
     private _disposeScene(): void {
@@ -279,8 +334,6 @@ export class EditorWebXRSimulator extends Component<IEditorWebXRSimulatorProps, 
             }
             this._engine = null as any;
         }
-
-        // no longer storing canvas reference
     }
 
     private _setVRPolyfill(enable: boolean) {
@@ -295,183 +348,25 @@ export class EditorWebXRSimulator extends Component<IEditorWebXRSimulatorProps, 
 
     private _enablePolyfill() {
         try {
-            const win = window as any;
-
-            if (win.navigator && win.navigator.xr) {
-                // already exists: preserve but do not overwrite
-                this._originalNavigatorXR = win.navigator.xr;
-            }
-
-            // minimal XRWebGLLayer if not present
-            if (!win.XRWebGLLayer) {
-                win.XRWebGLLayer = function (_session: any, gl: any) {
-                    void _session;
-                    // minimal polyfill: we only mimic the framebuffer property
-                    // Babylon may use baseLayer.framebuffer so provide a small object
-                    this.framebuffer = gl.getParameter(gl.FRAMEBUFFER_BINDING) || 0;
-                };
-            }
-
-            // Create a minimal navigator.xr object that also provides controller inputSpaces
-            const polyfill = {
-                _simulated: true,
-                isSessionSupported: (sessionType: string) => Promise.resolve(sessionType === "immersive-vr"),
-                requestSession: (sessionType: string, options?: any) => {
-                    void options;
-                    if (sessionType !== "immersive-vr") {
-                        return Promise.reject(new Error("webxr-simulator only supports immersive-vr"));
-                    }
-
-                    return new Promise((res) => {
-                        const handlers: Record<string, Array<Function>> = {};
-                        const rafIdMap: Record<number, number> = {};
-                        let rafIdCounter = 0;
-
-                        // create unique spaces for controller grips
-                        const leftGripSpace = { __simulatorSpace: "left" };
-                        const rightGripSpace = { __simulatorSpace: "right" };
-
-                        const requestAnimationFrame = (cb: Function) => {
-                            // clamp to ~60hz
-                            const id = ++rafIdCounter;
-                            const intervalId = window.setInterval(() => {
-                                // Build a very small, minimal XRFrame that exposes viewer and controller poses
-                                const time = performance.now();
-                                const frame: any = {
-                                    getViewerPose: (refSpace: any) => {
-                                        void refSpace;
-                                        const sim = (window as any).__webxrSimulator;
-                                        if (!sim || !sim.getHeadPose) {
-                                            return null;
-                                        }
-
-                                        const pose = sim.getHeadPose();
-
-                                        const makeView = (eye: string) => {
-                                            return {
-                                                eye,
-                                                transform: {
-                                                    position: { x: pose.position.x + (eye === "left" ? -0.032 : 0.032), y: pose.position.y, z: pose.position.z },
-                                                    orientation: pose.orientation,
-                                                },
-                                                projectionMatrix: new Float32Array([1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1]),
-                                            };
-                                        };
-
-                                        return {
-                                            views: [makeView("left"), makeView("right")],
-                                        };
-                                    },
-                                    getPose: (space: any, refSpace: any) => {
-                                        void refSpace;
-                                        const sim = (window as any).__webxrSimulator;
-                                        if (!sim) {
-                                            return null;
-                                        }
-
-                                        // left controller grip
-                                        if (space === leftGripSpace) {
-                                            const leftPose = sim.getLeftPose();
-                                            if (!leftPose) {
-                                                return null;
-                                            }
-
-                                            return {
-                                                transform: {
-                                                    position: { x: leftPose.position.x, y: leftPose.position.y, z: leftPose.position.z },
-                                                    orientation: leftPose.orientation,
-                                                },
-                                            };
-                                        }
-
-                                        // right controller grip
-                                        if (space === rightGripSpace) {
-                                            const rightPose = sim.getRightPose();
-                                            if (!rightPose) {
-                                                return null;
-                                            }
-
-                                            return {
-                                                transform: {
-                                                    position: { x: rightPose.position.x, y: rightPose.position.y, z: rightPose.position.z },
-                                                    orientation: rightPose.orientation,
-                                                },
-                                            };
-                                        }
-
-                                        return null;
-                                    },
-                                };
-
-                                try {
-                                    cb(time, frame);
-                                } catch (e) {
-                                    // swallow
-                                }
-                            }, 1000 / 60);
-
-                            rafIdMap[id] = intervalId;
-                            return id;
-                        };
-
-                        const cancelAnimationFrame = (id: number) => {
-                            const intId = rafIdMap[id];
-                            if (intId) {
-                                clearInterval(intId);
-                                delete rafIdMap[id];
-                            }
-                        };
-
-                        const _sessionObj: any = {
-                            inputSources: [
-                                { handedness: "left", targetRayMode: "tracked-pointer", gripSpace: leftGripSpace, profiles: ["simulated-controller"] },
-                                { handedness: "right", targetRayMode: "tracked-pointer", gripSpace: rightGripSpace, profiles: ["simulated-controller"] },
-                            ],
-                            addEventListener: (n: string, fn: Function) => {
-                                if (!handlers[n]) {
-                                    handlers[n] = [];
-                                }
-                                handlers[n].push(fn);
-                            },
-                            removeEventListener: (n: string, fn: Function) => {
-                                if (handlers[n]) {
-                                    handlers[n] = handlers[n].filter((f) => f !== fn);
-                                }
-                            },
-                            requestReferenceSpace: (type: string) => {
-                                void type;
-                                return Promise.resolve({});
-                            },
-                            updateRenderState: (s: any) => {
-                                void s;
-                                return undefined;
-                            },
-                            requestAnimationFrame,
-                            cancelAnimationFrame,
-                            end: async () => {
-                                if (handlers["end"]) {
-                                    handlers["end"].forEach((fn) => fn());
-                                }
-                            },
-                        };
-
-                        // set navigator.xr to this polyfill (intentional override so preview detects XR availability)
-                        win.navigator.xr = polyfill;
-
-                        res(_sessionObj);
-                     });
-                 },
-             } as any;
-
-            // store original so we can restore
-            this._originalNavigatorXR = (window as any).navigator?.xr ?? undefined;
-
-            (window as any).navigator.xr = polyfill;
-
+            // expose simple helpers that the polyfill will call
             (window as any).__webxrSimulator ||= {};
             (window as any).__webxrSimulator.getHeadPose = () => this._getHeadPosePlain();
             (window as any).__webxrSimulator.getLeftPose = () => this._getLeftControllerPosePlain();
             (window as any).__webxrSimulator.getRightPose = () => this._getRightControllerPosePlain();
+            (window as any).__webxrSimulator.getLeftGamepad = () => this._getLeftGamepadPlain();
+            (window as any).__webxrSimulator.getRightGamepad = () => this._getRightGamepadPlain();
+
+            // Install polyfill via shared helper
+            this._uninstallPolyfill = installSimulatedWebXR({
+                getHeadPose: () => this._getHeadPosePlain(),
+                getLeftPose: () => this._getLeftControllerPosePlain(),
+                getRightPose: () => this._getRightControllerPosePlain(),
+                getLeftGamepad: () => this._getLeftGamepadPlain(),
+                getRightGamepad: () => this._getRightGamepadPlain(),
+            });
+
+            // allow other parts of the editor/preview to react
+            window.dispatchEvent(new CustomEvent("webxr-polyfill-changed", { detail: { enabled: true } }));
         } catch (e) {
             console.error("Failed to enable webxr polyfill", e);
         }
@@ -479,22 +374,16 @@ export class EditorWebXRSimulator extends Component<IEditorWebXRSimulatorProps, 
 
     private _disablePolyfill() {
         try {
-            const win = window as any;
-            if (this._originalNavigatorXR) {
-                win.navigator.xr = this._originalNavigatorXR;
-            } else if (win.navigator && win.navigator.xr && win.navigator.xr._simulated) {
-                // only remove simulated polyfill if we created it
-                try {
-                    // Use a safe delete while keeping TypeScript happy
-                    delete (win.navigator as any).xr;
-                } catch (e) {
-                    win.navigator.xr = undefined;
-                }
+            if (this._uninstallPolyfill) {
+                this._uninstallPolyfill();
+                this._uninstallPolyfill = null;
             }
 
-            if (win.__webxrSimulator) {
-                delete win.__webxrSimulator;
+            if ((window as any).__webxrSimulator) {
+                delete (window as any).__webxrSimulator;
             }
+
+            window.dispatchEvent(new CustomEvent("webxr-polyfill-changed", { detail: { enabled: false } }));
         } catch (e) {
             // ignore
         }
@@ -584,5 +473,79 @@ export class EditorWebXRSimulator extends Component<IEditorWebXRSimulatorProps, 
             position: { x: pos.x, y: pos.y, z: pos.z },
             orientation: { x: rotQ.x, y: rotQ.y, z: rotQ.z, w: rotQ.w },
         };
+    }
+
+    // Accessors for the polyfill to read the current simulated gamepad states
+    private _getLeftGamepadPlain() {
+        return { axes: [...this._leftGamepad.axes], buttons: this._leftGamepad.buttons.map((b) => ({ pressed: !!b.pressed, value: b.value })) };
+    }
+
+    private _getRightGamepadPlain() {
+        return { axes: [...this._rightGamepad.axes], buttons: this._rightGamepad.buttons.map((b) => ({ pressed: !!b.pressed, value: b.value })) };
+    }
+
+    private _notifyInputSourcesChange() {
+        try {
+            const xr: any = (window as any).navigator?.xr;
+            if (xr && typeof xr._fireInputSourcesChange === "function") {
+                xr._fireInputSourcesChange({ added: [], removed: [] });
+            }
+        } catch (e) {
+            // ignore
+        }
+    }
+
+    private _setLeftTrigger(v: number) {
+        this._leftGamepad.buttons[0] = { pressed: v > 0.5, value: v };
+        this._notifyInputSourcesChange();
+        this.forceUpdate();
+    }
+
+    private _setLeftThumbX(v: number) {
+        this._leftGamepad.axes[0] = v;
+        this._notifyInputSourcesChange();
+        this.forceUpdate();
+    }
+
+    private _setLeftThumbY(v: number) {
+        this._leftGamepad.axes[1] = v;
+        this._notifyInputSourcesChange();
+        this.forceUpdate();
+    }
+
+    private _toggleLeftButton(index: number) {
+        const b = this._leftGamepad.buttons[index] || { pressed: false, value: 0 };
+        b.pressed = !b.pressed;
+        b.value = b.pressed ? 1 : 0;
+        this._leftGamepad.buttons[index] = b;
+        this._notifyInputSourcesChange();
+        this.forceUpdate();
+    }
+
+    private _setRightTrigger(v: number) {
+        this._rightGamepad.buttons[0] = { pressed: v > 0.5, value: v };
+        this._notifyInputSourcesChange();
+        this.forceUpdate();
+    }
+
+    private _setRightThumbX(v: number) {
+        this._rightGamepad.axes[0] = v;
+        this._notifyInputSourcesChange();
+        this.forceUpdate();
+    }
+
+    private _setRightThumbY(v: number) {
+        this._rightGamepad.axes[1] = v;
+        this._notifyInputSourcesChange();
+        this.forceUpdate();
+    }
+
+    private _toggleRightButton(index: number) {
+        const b = this._rightGamepad.buttons[index] || { pressed: false, value: 0 };
+        b.pressed = !b.pressed;
+        b.value = b.pressed ? 1 : 0;
+        this._rightGamepad.buttons[index] = b;
+        this._notifyInputSourcesChange();
+        this.forceUpdate();
     }
 }
