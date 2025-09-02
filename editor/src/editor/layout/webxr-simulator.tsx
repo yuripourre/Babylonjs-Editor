@@ -66,8 +66,23 @@ export class EditorWebXRSimulator extends Component<IEditorWebXRSimulatorProps, 
     // Simulation helpers
     private _uninstallPolyfill: (() => void) | null = null;
 
-    private _leftGamepad: ISimulatedGamepad = { axes: [0, 0], buttons: [{ pressed: false, value: 0 }] };
-    private _rightGamepad: ISimulatedGamepad = { axes: [0, 0], buttons: [{ pressed: false, value: 0 }] };
+    // Gamepad layout: axes[0]=thumbX, axes[1]=thumbY
+    // buttons: 0=trigger, 1=squeeze, 2=primary, 3=secondary, 4=thumbstick press
+    private _leftGamepad: ISimulatedGamepad = { axes: [0, 0], buttons: [
+        { pressed: false, value: 0 },
+        { pressed: false, value: 0 },
+        { pressed: false, value: 0 },
+        { pressed: false, value: 0 },
+        { pressed: false, value: 0 },
+    ] };
+
+    private _rightGamepad: ISimulatedGamepad = { axes: [0, 0], buttons: [
+        { pressed: false, value: 0 },
+        { pressed: false, value: 0 },
+        { pressed: false, value: 0 },
+        { pressed: false, value: 0 },
+        { pressed: false, value: 0 },
+    ] };
 
     public constructor(props: IEditorWebXRSimulatorProps) {
         super(props);
@@ -98,26 +113,25 @@ export class EditorWebXRSimulator extends Component<IEditorWebXRSimulatorProps, 
                 <canvas ref={(r) => this._onGotCanvasRef(r!)} className="w-full h-full select-none" />
 
                 {/* Controller emulation UI */}
-                <div className="absolute top-12 right-2 z-50 w-72 p-2 rounded bg-background/80 backdrop-blur">
+                <div className="absolute top-12 right-2 z-50 w-80 p-3 rounded bg-background/80 backdrop-blur">
                     <div className="text-sm font-bold mb-1">Left Controller</div>
                     <div className="flex flex-col gap-1">
                         <label className="text-xs">Trigger ({this._leftGamepad.buttons[0].value.toFixed(2)})</label>
-                        <input
-                            type="range"
-                            min="0"
-                            max="1"
-                            step="0.01"
-                            value={this._leftGamepad.buttons[0].value}
-                            onChange={(e) => this._setLeftTrigger(parseFloat(e.target.value))}
-                        />
+                        <input type="range" min="0" max="1" step="0.01" value={this._leftGamepad.buttons[0].value} onChange={(e) => this._setLeftTrigger(parseFloat(e.target.value))} />
+
+                        <label className="text-xs">Squeeze ({this._leftGamepad.buttons[1].value.toFixed(2)})</label>
+                        <input type="range" min="0" max="1" step="0.01" value={this._leftGamepad.buttons[1].value} onChange={(e) => this._setLeftSqueeze(parseFloat(e.target.value))} />
+
                         <label className="text-xs">Thumb X ({this._leftGamepad.axes[0].toFixed(2)})</label>
                         <input type="range" min="-1" max="1" step="0.01" value={this._leftGamepad.axes[0]} onChange={(e) => this._setLeftThumbX(parseFloat(e.target.value))} />
+
                         <label className="text-xs">Thumb Y ({this._leftGamepad.axes[1].toFixed(2)})</label>
                         <input type="range" min="-1" max="1" step="0.01" value={this._leftGamepad.axes[1]} onChange={(e) => this._setLeftThumbY(parseFloat(e.target.value))} />
+
                         <div className="flex gap-2">
-                            <button className="btn" onClick={() => this._toggleLeftButton(1)}>
-                                {this._leftGamepad.buttons[1]?.pressed ? "A: Pressed" : "A: Off"}
-                            </button>
+                            <button className="btn" onClick={() => this._toggleLeftPrimary()}>{this._leftGamepad.buttons[2].pressed ? "Primary: On" : "Primary: Off"}</button>
+                            <button className="btn" onClick={() => this._toggleLeftSecondary()}>{this._leftGamepad.buttons[3].pressed ? "Secondary: On" : "Secondary: Off"}</button>
+                            <button className="btn" onClick={() => this._toggleLeftThumbPress()}>{this._leftGamepad.buttons[4].pressed ? "Thumb: Pressed" : "Thumb: Off"}</button>
                         </div>
                     </div>
 
@@ -126,22 +140,21 @@ export class EditorWebXRSimulator extends Component<IEditorWebXRSimulatorProps, 
                     <div className="text-sm font-bold mb-1">Right Controller</div>
                     <div className="flex flex-col gap-1">
                         <label className="text-xs">Trigger ({this._rightGamepad.buttons[0].value.toFixed(2)})</label>
-                        <input
-                            type="range"
-                            min="0"
-                            max="1"
-                            step="0.01"
-                            value={this._rightGamepad.buttons[0].value}
-                            onChange={(e) => this._setRightTrigger(parseFloat(e.target.value))}
-                        />
+                        <input type="range" min="0" max="1" step="0.01" value={this._rightGamepad.buttons[0].value} onChange={(e) => this._setRightTrigger(parseFloat(e.target.value))} />
+
+                        <label className="text-xs">Squeeze ({this._rightGamepad.buttons[1].value.toFixed(2)})</label>
+                        <input type="range" min="0" max="1" step="0.01" value={this._rightGamepad.buttons[1].value} onChange={(e) => this._setRightSqueeze(parseFloat(e.target.value))} />
+
                         <label className="text-xs">Thumb X ({this._rightGamepad.axes[0].toFixed(2)})</label>
                         <input type="range" min="-1" max="1" step="0.01" value={this._rightGamepad.axes[0]} onChange={(e) => this._setRightThumbX(parseFloat(e.target.value))} />
+
                         <label className="text-xs">Thumb Y ({this._rightGamepad.axes[1].toFixed(2)})</label>
                         <input type="range" min="-1" max="1" step="0.01" value={this._rightGamepad.axes[1]} onChange={(e) => this._setRightThumbY(parseFloat(e.target.value))} />
+
                         <div className="flex gap-2">
-                            <button className="btn" onClick={() => this._toggleRightButton(1)}>
-                                {this._rightGamepad.buttons[1]?.pressed ? "A: Pressed" : "A: Off"}
-                            </button>
+                            <button className="btn" onClick={() => this._toggleRightPrimary()}>{this._rightGamepad.buttons[2].pressed ? "Primary: On" : "Primary: Off"}</button>
+                            <button className="btn" onClick={() => this._toggleRightSecondary()}>{this._rightGamepad.buttons[3].pressed ? "Secondary: On" : "Secondary: Off"}</button>
+                            <button className="btn" onClick={() => this._toggleRightThumbPress()}>{this._rightGamepad.buttons[4].pressed ? "Thumb: Pressed" : "Thumb: Off"}</button>
                         </div>
                     </div>
                 </div>
@@ -501,6 +514,66 @@ export class EditorWebXRSimulator extends Component<IEditorWebXRSimulatorProps, 
         this.forceUpdate();
     }
 
+    private _toggleLeftButton(index: number) {
+        const b = this._leftGamepad.buttons[index] || { pressed: false, value: 0 };
+        b.pressed = !b.pressed;
+        b.value = b.pressed ? 1 : 0;
+        this._leftGamepad.buttons[index] = b;
+        this._notifyInputSourcesChange();
+        this.forceUpdate();
+    }
+
+    private _setLeftSqueeze(v: number) {
+        this._leftGamepad.buttons[1] = { pressed: v > 0.5, value: v };
+        this._notifyInputSourcesChange();
+        this.forceUpdate();
+    }
+
+    private _toggleLeftPrimary() {
+        this._toggleLeftButton(2);
+    }
+
+    private _toggleLeftSecondary() {
+        this._toggleLeftButton(3);
+    }
+
+    private _toggleLeftThumbPress() {
+        this._toggleLeftButton(4);
+    }
+
+    private _setRightTrigger(v: number) {
+        this._rightGamepad.buttons[0] = { pressed: v > 0.5, value: v };
+        this._notifyInputSourcesChange();
+        this.forceUpdate();
+    }
+
+    private _toggleRightButton(index: number) {
+        const b = this._rightGamepad.buttons[index] || { pressed: false, value: 0 };
+        b.pressed = !b.pressed;
+        b.value = b.pressed ? 1 : 0;
+        this._rightGamepad.buttons[index] = b;
+        this._notifyInputSourcesChange();
+        this.forceUpdate();
+    }
+
+    private _setRightSqueeze(v: number) {
+        this._rightGamepad.buttons[1] = { pressed: v > 0.5, value: v };
+        this._notifyInputSourcesChange();
+        this.forceUpdate();
+    }
+
+    private _toggleRightPrimary() {
+        this._toggleRightButton(2);
+    }
+
+    private _toggleRightSecondary() {
+        this._toggleRightButton(3);
+    }
+
+    private _toggleRightThumbPress() {
+        this._toggleRightButton(4);
+    }
+
     private _setLeftThumbX(v: number) {
         this._leftGamepad.axes[0] = v;
         this._notifyInputSourcesChange();
@@ -513,21 +586,6 @@ export class EditorWebXRSimulator extends Component<IEditorWebXRSimulatorProps, 
         this.forceUpdate();
     }
 
-    private _toggleLeftButton(index: number) {
-        const b = this._leftGamepad.buttons[index] || { pressed: false, value: 0 };
-        b.pressed = !b.pressed;
-        b.value = b.pressed ? 1 : 0;
-        this._leftGamepad.buttons[index] = b;
-        this._notifyInputSourcesChange();
-        this.forceUpdate();
-    }
-
-    private _setRightTrigger(v: number) {
-        this._rightGamepad.buttons[0] = { pressed: v > 0.5, value: v };
-        this._notifyInputSourcesChange();
-        this.forceUpdate();
-    }
-
     private _setRightThumbX(v: number) {
         this._rightGamepad.axes[0] = v;
         this._notifyInputSourcesChange();
@@ -536,15 +594,6 @@ export class EditorWebXRSimulator extends Component<IEditorWebXRSimulatorProps, 
 
     private _setRightThumbY(v: number) {
         this._rightGamepad.axes[1] = v;
-        this._notifyInputSourcesChange();
-        this.forceUpdate();
-    }
-
-    private _toggleRightButton(index: number) {
-        const b = this._rightGamepad.buttons[index] || { pressed: false, value: 0 };
-        b.pressed = !b.pressed;
-        b.value = b.pressed ? 1 : 0;
-        this._rightGamepad.buttons[index] = b;
         this._notifyInputSourcesChange();
         this.forceUpdate();
     }
