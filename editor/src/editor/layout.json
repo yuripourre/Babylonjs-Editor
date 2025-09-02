@@ -78,6 +78,14 @@
 								"component": "console",
 								"enableClose": false,
 								"enableRenderOnDemand": false
+							},
+							{
+								"type": "tab",
+								"id": "webxr-simulator",
+								"name": "WebXR Simulator",
+								"component": "webxr-simulator",
+								"enableClose": false,
+								"enableRenderOnDemand": false
 							}
 						]
 					}

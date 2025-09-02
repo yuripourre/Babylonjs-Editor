@@ -19,6 +19,7 @@ import { EditorInspector } from "./layout/inspector";
 import { EditorAnimation } from "./layout/animation";
 import { EditorAssetsBrowser } from "./layout/assets-browser";
 import { EditorMarketplaceBrowser } from "./layout/marketplace";
+import { EditorWebXRSimulator } from "./layout/webxr-simulator";
 
 export interface IEditorLayoutProps {
 	/**
@@ -72,6 +73,11 @@ export class EditorLayout extends Component<IEditorLayoutProps> {
 	 */
 	public onLayoutChanged: Observable<void> = new Observable<void>();
 
+	/**
+	 * The WebXR simulator panel.
+	 */
+	public webxrSimulator: EditorWebXRSimulator;
+
 	private _layoutRef: Layout | null = null;
 	private _model: Model = Model.fromJson(layoutModel as any);
 	private _components: Record<string, ReactNode> = {
@@ -82,6 +88,7 @@ export class EditorLayout extends Component<IEditorLayoutProps> {
 		"assets-browser": <EditorAssetsBrowser editor={this.props.editor} ref={(r) => (this.assets = r!)} />,
 		animations: <EditorAnimation editor={this.props.editor} ref={(r) => (this.animations = r!)} />,
 		marketplace: <EditorMarketplaceBrowser editor={this.props.editor} ref={(r) => (this.marketplace = r)} />,
+		"webxr-simulator": <EditorWebXRSimulator editor={this.props.editor} ref={(r) => (this.webxrSimulator = r!)} />,
 	};
 
 	private _layoutVersion: string = "5.0.0-alpha.2";
