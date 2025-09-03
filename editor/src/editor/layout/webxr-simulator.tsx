@@ -15,7 +15,7 @@ import {
     StandardMaterial,
     Color3,
     Quaternion,
-    Viewport,
+
     AbstractMesh,
     Nullable,
 } from "babylonjs";
@@ -28,7 +28,7 @@ export interface IEditorWebXRSimulatorProps {
 
 export interface IEditorWebXRSimulatorState {
     enableVR: boolean;
-    immersive: boolean;
+    previewVR: boolean;
 }
 
 /**
@@ -58,8 +58,7 @@ export class EditorWebXRSimulator extends Component<IEditorWebXRSimulatorProps, 
     private _dragOffset: Vector3 = Vector3.Zero();
     private _isDragging: boolean = false;
 
-    private _leftCamera: Nullable<FreeCamera> = null;
-    private _rightCamera: Nullable<FreeCamera> = null;
+
 
 
 
@@ -89,7 +88,7 @@ export class EditorWebXRSimulator extends Component<IEditorWebXRSimulatorProps, 
 
         this.state = {
             enableVR: false,
-            immersive: false,
+            previewVR: false,
         };
     }
 
@@ -105,10 +104,10 @@ export class EditorWebXRSimulator extends Component<IEditorWebXRSimulatorProps, 
                         <Button 
                             variant="ghost" 
                             className="!px-2 !py-2" 
-                            onClick={() => this._toggleImmersiveMode()}
+                            onClick={() => this._togglePreviewVR()}
                             disabled={!this.state.enableVR}
                         >
-                            {this.state.immersive ? "Exit VR" : "Enter VR"}
+                            {this.state.previewVR ? "Exit Preview VR" : "Enter Preview VR"}
                         </Button>
 
                         <div className="text-xs text-muted">
@@ -240,9 +239,7 @@ export class EditorWebXRSimulator extends Component<IEditorWebXRSimulatorProps, 
         // Set as active camera
         this._scene.activeCamera = camera;
 
-        // Stereo cameras (visible only in immersive mode)
-        this._leftCamera = new FreeCamera("left_cam", new Vector3(0, 1.6, 3), this._scene);
-        this._rightCamera = new FreeCamera("right_cam", new Vector3(0, 1.6, 3), this._scene);
+        // Simulator always uses single camera - no stereo cameras needed
 
         // Run loop
         this._engine.runRenderLoop(() => {
@@ -250,10 +247,7 @@ export class EditorWebXRSimulator extends Component<IEditorWebXRSimulatorProps, 
                 return;
             }
 
-            // Update stereo camera poses when immersive
-            if (this.state.immersive) {
-                this._updateStereoCameras();
-            }
+            // Simulator always stays in normal 3D view - no stereo cameras needed
 
             this._scene.render();
         });
@@ -304,12 +298,7 @@ export class EditorWebXRSimulator extends Component<IEditorWebXRSimulatorProps, 
         this.forceUpdate();
     }
 
-    private _rotateVecByQuat(v: Vector3, q: Quaternion): Vector3 {
-        const qv = new Vector3(q.x, q.y, q.z);
-        const t = Vector3.Cross(qv, v).scale(2);
-        const result = v.add(t.scale(q.w)).add(Vector3.Cross(qv, t));
-        return result;
-    }
+
 
     private _getHeadPosePlain() {
         if (!this._headset) {
@@ -328,39 +317,7 @@ export class EditorWebXRSimulator extends Component<IEditorWebXRSimulatorProps, 
         };
     }
 
-    private _updateStereoCameras() {
-        if (!this._headset || !this._leftCamera || !this._rightCamera || !this._scene) {
-            return;
-        }
 
-        const ipd = 0.064; // meters
-        const headPos = this._headset.absolutePosition || new Vector3(0, 1.6, 0);
-        const headRot = (this._headset.rotationQuaternion as Quaternion) || new Quaternion(0, 0, 0, 1);
-
-        // IPD offset in local space, rotated by headset orientation for realistic stereo
-        const leftLocal = new Vector3(-ipd / 2, 0, 0);
-        const rightLocal = new Vector3(ipd / 2, 0, 0);
-
-        const leftOffset = this._rotateVecByQuat(leftLocal, headRot);
-        const rightOffset = this._rotateVecByQuat(rightLocal, headRot);
-
-        const leftPos = headPos.add(leftOffset);
-        const rightPos = headPos.add(rightOffset);
-
-        this._leftCamera.position = leftPos;
-        this._rightCamera.position = rightPos;
-
-        this._leftCamera.rotationQuaternion = headRot;
-        this._rightCamera.rotationQuaternion = headRot;
-
-        // split screen
-        this._leftCamera.viewport = new Viewport(0, 0, 0.5, 1);
-        this._rightCamera.viewport = new Viewport(0.5, 0, 0.5, 1);
-
-        this._scene.activeCameras = [this._leftCamera, this._rightCamera];
-        this._scene.activeCamera = this._leftCamera as any;
-        this._scene.cameraToUseForPointers = this._leftCamera as any;
-    }
 
     private _disposeScene(): void {
         if (this._scene) {
@@ -435,9 +392,9 @@ export class EditorWebXRSimulator extends Component<IEditorWebXRSimulatorProps, 
         }
     }
 
-    private async _toggleImmersiveMode() {
-        if (!this.state.immersive) {
-            // Enter immersive: enable VR mode in the main preview panel
+    private async _togglePreviewVR() {
+        if (!this.state.previewVR) {
+            // Enter preview VR: enable VR mode in the main preview panel only
             try {
                 if (!(window as any).navigator?.xr) {
                     // If polyfill isn't enabled, enable it temporarily
@@ -450,14 +407,14 @@ export class EditorWebXRSimulator extends Component<IEditorWebXRSimulatorProps, 
                     await (this.props.editor.layout.preview as any)._togglePreviewXR();
                 }
 
-                this.setState({ immersive: true });
+                this.setState({ previewVR: true });
             } catch (e) {
                 console.error("Failed to start preview VR mode", e);
-                // fallback: set immersive true locally
-                this.setState({ immersive: true });
+                // fallback: set previewVR true locally
+                this.setState({ previewVR: true });
             }
         } else {
-            // exit immersive
+            // exit preview VR
             try {
                 // Stop VR mode in the main preview panel
                 if (this.props.editor.layout.preview && (this.props.editor.layout.preview as any)._togglePreviewXR) {
@@ -467,7 +424,7 @@ export class EditorWebXRSimulator extends Component<IEditorWebXRSimulatorProps, 
                 console.error("Failed to stop preview VR mode", e);
             }
 
-            this.setState({ immersive: false });
+            this.setState({ previewVR: false });
         }
     }
 
@@ -618,8 +575,8 @@ export class EditorWebXRSimulator extends Component<IEditorWebXRSimulatorProps, 
     private _onPreviewVRChanged = (event: CustomEvent) => {
         // Sync simulator state with preview VR state
         const isVRActive = event.detail?.active || false;
-        if (isVRActive !== this.state.immersive) {
-            this.setState({ immersive: isVRActive });
+        if (isVRActive !== this.state.previewVR) {
+            this.setState({ previewVR: isVRActive });
         }
     };
 }
