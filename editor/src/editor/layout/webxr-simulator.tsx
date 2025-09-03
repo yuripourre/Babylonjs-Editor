@@ -15,9 +15,11 @@ import {
     StandardMaterial,
     Color3,
     Quaternion,
-
     AbstractMesh,
     Nullable,
+    PositionGizmo,
+    UtilityLayerRenderer,
+    PointerEventTypes,
 } from "babylonjs";
 
 import { installSimulatedWebXR, ISimulatedGamepad } from "../../tools/webxr/polyfill";
@@ -29,6 +31,7 @@ export interface IEditorWebXRSimulatorProps {
 export interface IEditorWebXRSimulatorState {
     enableVR: boolean;
     previewVR: boolean;
+    showGizmos: boolean;
 }
 
 /**
@@ -58,9 +61,11 @@ export class EditorWebXRSimulator extends Component<IEditorWebXRSimulatorProps, 
     private _dragOffset: Vector3 = Vector3.Zero();
     private _isDragging: boolean = false;
 
-
-
-
+    // Gizmos
+    private _gizmosLayer: UtilityLayerRenderer | null = null;
+    private _headsetGizmo: PositionGizmo | null = null;
+    private _leftControllerGizmo: PositionGizmo | null = null;
+    private _rightControllerGizmo: PositionGizmo | null = null;
 
     // Simulation helpers
     private _uninstallPolyfill: (() => void) | null = null;
@@ -89,6 +94,7 @@ export class EditorWebXRSimulator extends Component<IEditorWebXRSimulatorProps, 
         this.state = {
             enableVR: false,
             previewVR: false,
+            showGizmos: true,
         };
     }
 
@@ -110,9 +116,23 @@ export class EditorWebXRSimulator extends Component<IEditorWebXRSimulatorProps, 
                             {this.state.previewVR ? "Exit Preview VR" : "Enter Preview VR"}
                         </Button>
 
-                        <div className="text-xs text-muted">
-                            {this.state.enableVR ? "WebXR polyfill active - Drag boxes to move headset / controllers" : "Enable VR to start simulation"}
-                        </div>
+                        <Toggle pressed={this.state.showGizmos} onPressedChange={(v) => this._toggleGizmos(v)}>
+                            {this.state.showGizmos ? "🎯 Gizmos On" : "Gizmos Off"}
+                        </Toggle>
+                        {this.state.enableVR && (
+                            <div className="text-xs text-gray-500">
+                                Press 'G' to toggle gizmos
+                            </div>
+                        )}
+
+                                        <div className="text-xs text-muted">
+                    {this.state.enableVR ? "WebXR polyfill active - Use gizmos to move VR objects" : "Enable VR to start simulation"}
+                </div>
+                {this.state.enableVR && this.state.showGizmos && (
+                    <div className="text-xs text-blue-600 mt-1">
+                        🎯 Click and drag gizmo arrows to move objects
+                    </div>
+                )}
                         
                         {this.state.enableVR && (
                             <div className="flex items-center gap-1 text-xs text-green-600">
@@ -176,11 +196,13 @@ export class EditorWebXRSimulator extends Component<IEditorWebXRSimulatorProps, 
     }
 
     public componentWillUnmount(): void {
+        this._disposeGizmos();
         this._disposeScene();
         this._disablePolyfill();
         
         // Remove event listener for preview VR changes
         window.removeEventListener("preview-vr-changed", this._onPreviewVRChanged);
+        window.removeEventListener("keydown", this._onKeyDown);
     }
 
     private async _onGotCanvasRef(canvas: HTMLCanvasElement): Promise<void> {
@@ -236,8 +258,67 @@ export class EditorWebXRSimulator extends Component<IEditorWebXRSimulatorProps, 
         camera.angularSensibility = 2000;
         camera.inertia = 0.9;
         
+        // Camera is configured for basic interaction
+        
         // Set as active camera
         this._scene.activeCamera = camera;
+
+        // Create gizmos for VR objects
+        this._createGizmos();
+
+        // Add scene pointer event handling to prioritize gizmo interactions
+        this._scene.onPointerObservable.add((pointerInfo) => {
+            if (this._scene && this.state.showGizmos) {
+                // Get the canvas element to calculate proper coordinates
+                const canvas = this._scene.getEngine().getRenderingCanvas();
+                if (canvas) {
+                    // Use the scene's built-in coordinate calculation
+                    const x = pointerInfo.event.offsetX;
+                    const y = pointerInfo.event.offsetY;
+                    
+                    console.log("Pointer event:", {
+                        type: pointerInfo.type,
+                        clientX: pointerInfo.event.clientX,
+                        clientY: pointerInfo.event.clientY,
+                        offsetX: pointerInfo.event.offsetX,
+                        offsetY: pointerInfo.event.offsetY,
+                        canvasWidth: canvas.width,
+                        canvasHeight: canvas.height
+                    });
+                    
+                    if (pointerInfo.type === PointerEventTypes.POINTERDOWN) {
+                        // Check both main scene and utility layer for gizmo picks
+                        const mainPickInfo = this._scene.pick(x, y);
+                        const utilityPickInfo = this._gizmosLayer ? this._gizmosLayer.utilityLayerScene.pick(x, y) : null;
+                        
+                        console.log("Pick results:", {
+                            mainPick: mainPickInfo ? { hit: mainPickInfo.hit, meshName: mainPickInfo.pickedMesh?.name } : null,
+                            utilityPick: utilityPickInfo ? { hit: utilityPickInfo.hit, meshName: utilityPickInfo.pickedMesh?.name } : null
+                        });
+                        
+                        const pickInfo = utilityPickInfo && utilityPickInfo.hit ? utilityPickInfo : mainPickInfo;
+                        
+                        if (pickInfo && pickInfo.hit && pickInfo.pickedMesh) {
+                            // Check if we're picking a gizmo
+                            const meshName = pickInfo.pickedMesh.name;
+                            if (meshName.includes("gizmo") || meshName.includes("Gizmo")) {
+                                console.log("Gizmo picked:", meshName, "at coordinates:", x, y);
+                                // Disable camera controls temporarily
+                                if (this._scene.activeCamera) {
+                                    this._scene.activeCamera.detachControl();
+                                }
+                                return;
+                            }
+                        }
+                    } else if (pointerInfo.type === PointerEventTypes.POINTERUP) {
+                        // Re-enable camera controls when pointer is released
+                        if (this._scene.activeCamera) {
+                            this._scene.activeCamera.attachControl(canvas, true);
+                        }
+                    }
+                }
+            }
+        });
 
         // Simulator always uses single camera - no stereo cameras needed
 
@@ -247,8 +328,19 @@ export class EditorWebXRSimulator extends Component<IEditorWebXRSimulatorProps, 
                 return;
             }
 
-            // Simulator always stays in normal 3D view - no stereo cameras needed
+            // Ensure utility layer camera stays in sync with main camera
+            if (this._gizmosLayer && this._gizmosLayer.utilityLayerScene) {
+                this._gizmosLayer.utilityLayerScene.activeCamera = this._scene.activeCamera;
+                
+                // Keep viewport synchronized
+                const mainCamera = this._scene.activeCamera;
+                const utilityCamera = this._gizmosLayer.utilityLayerScene.activeCamera;
+                if (mainCamera && utilityCamera) {
+                    utilityCamera.viewport = mainCamera.viewport.clone();
+                }
+            }
 
+            // Simulator always stays in normal 3D view - no stereo cameras needed
             this._scene.render();
         });
 
@@ -295,6 +387,9 @@ export class EditorWebXRSimulator extends Component<IEditorWebXRSimulatorProps, 
         // Listen for preview VR changes to keep simulator in sync
         window.addEventListener("preview-vr-changed", this._onPreviewVRChanged);
         
+        // Add keyboard event listener for gizmo toggle
+        window.addEventListener("keydown", this._onKeyDown);
+        
         this.forceUpdate();
     }
 
@@ -320,6 +415,8 @@ export class EditorWebXRSimulator extends Component<IEditorWebXRSimulatorProps, 
 
 
     private _disposeScene(): void {
+        this._disposeGizmos();
+        
         if (this._scene) {
             try {
                 this._scene.dispose();
@@ -579,4 +676,171 @@ export class EditorWebXRSimulator extends Component<IEditorWebXRSimulatorProps, 
             this.setState({ previewVR: isVRActive });
         }
     };
+
+    private _onKeyDown = (event: KeyboardEvent) => {
+        // Toggle gizmos with 'G' key when VR is enabled
+        if (event.key === 'g' || event.key === 'G') {
+            if (this.state.enableVR) {
+                this._toggleGizmos(!this.state.showGizmos);
+            }
+        }
+    };
+
+    private _toggleGizmos(show: boolean): void {
+        this.setState({ showGizmos: show });
+        
+        if (show) {
+            this._showGizmos();
+        } else {
+            this._hideGizmos();
+        }
+    }
+
+    private _showGizmos(): void {
+        if (this._headsetGizmo) this._headsetGizmo.attachedMesh = this._headset;
+        if (this._leftControllerGizmo) this._leftControllerGizmo.attachedMesh = this._leftController;
+        if (this._rightControllerGizmo) this._rightControllerGizmo.attachedMesh = this._rightController;
+    }
+
+    private _hideGizmos(): void {
+        if (this._headsetGizmo) this._headsetGizmo.attachedMesh = null;
+        if (this._leftControllerGizmo) this._leftControllerGizmo.attachedMesh = null;
+        if (this._rightControllerGizmo) this._rightControllerGizmo.attachedMesh = null;
+    }
+
+    private _createGizmos(): void {
+        if (!this._scene) {
+            return;
+        }
+
+        // Create gizmos layer with proper configuration for interaction
+        this._gizmosLayer = new UtilityLayerRenderer(this._scene);
+        this._gizmosLayer.utilityLayerScene.autoClearDepthAndStencil = true;
+        this._gizmosLayer.utilityLayerScene.autoClear = false;
+        
+        // Ensure the gizmos layer can receive pointer events
+        this._gizmosLayer.utilityLayerScene.pointerMovePredicate = () => true;
+        this._gizmosLayer.utilityLayerScene.pointerDownPredicate = () => true;
+        this._gizmosLayer.utilityLayerScene.pointerUpPredicate = () => true;
+        
+        // Set the same camera for the utility layer to ensure proper coordinate mapping
+        this._gizmosLayer.utilityLayerScene.activeCamera = this._scene.activeCamera;
+        
+        // Ensure the utility layer uses the same viewport as the main scene
+        this._gizmosLayer.utilityLayerScene.autoClear = false;
+        
+        // Force the utility layer to use the same viewport as the main scene
+        const mainCamera = this._scene.activeCamera;
+        if (mainCamera) {
+            this._gizmosLayer.utilityLayerScene.activeCamera!.viewport = mainCamera.viewport.clone();
+        }
+        
+        // Ensure the utility layer uses the same engine and canvas
+        this._gizmosLayer.utilityLayerScene.getEngine = () => this._scene!.getEngine();
+
+        // Create gizmos for each VR object
+        if (this._headset) {
+            this._headsetGizmo = new PositionGizmo(this._gizmosLayer);
+            this._headsetGizmo.attachedMesh = this.state.showGizmos ? this._headset : null;
+            this._headsetGizmo.scaleRatio = 1.5; // Make gizmos larger for easier interaction
+            this._headsetGizmo.planarGizmoEnabled = true;
+            this._headsetGizmo.updateGizmoRotationToMatchAttachedMesh = false;
+            this._headsetGizmo.updateGizmoPositionToMatchAttachedMesh = true;
+            
+            // Configure gizmo for better interaction
+            this._headsetGizmo.xGizmo.dragBehavior.enabled = true;
+            this._headsetGizmo.yGizmo.dragBehavior.enabled = true;
+            this._headsetGizmo.zGizmo.dragBehavior.enabled = true;
+            
+            // Listen for gizmo drag events
+            this._headsetGizmo.onDragStartObservable.add(() => {
+                console.log("Headset gizmo drag started");
+            });
+            
+            this._headsetGizmo.onDragObservable.add(() => {
+                // WebXR poses will be updated automatically through the existing pose getter methods
+                console.log("Headset position:", this._headset?.position);
+            });
+            
+            this._headsetGizmo.onDragEndObservable.add(() => {
+                console.log("Headset gizmo drag ended");
+            });
+        }
+
+        if (this._leftController) {
+            this._leftControllerGizmo = new PositionGizmo(this._gizmosLayer);
+            this._leftControllerGizmo.attachedMesh = this.state.showGizmos ? this._leftController : null;
+            this._leftControllerGizmo.scaleRatio = 1.5;
+            this._leftControllerGizmo.planarGizmoEnabled = true;
+            this._leftControllerGizmo.updateGizmoRotationToMatchAttachedMesh = false;
+            this._leftControllerGizmo.updateGizmoPositionToMatchAttachedMesh = true;
+            
+            // Configure gizmo for better interaction
+            this._leftControllerGizmo.xGizmo.dragBehavior.enabled = true;
+            this._leftControllerGizmo.yGizmo.dragBehavior.enabled = true;
+            this._leftControllerGizmo.zGizmo.dragBehavior.enabled = true;
+            
+            this._leftControllerGizmo.onDragStartObservable.add(() => {
+                console.log("Left controller gizmo drag started");
+            });
+            
+            this._leftControllerGizmo.onDragObservable.add(() => {
+                console.log("Left controller position:", this._leftController?.position);
+            });
+            
+            this._leftControllerGizmo.onDragEndObservable.add(() => {
+                console.log("Left controller gizmo drag ended");
+            });
+        }
+
+        if (this._rightController) {
+            this._rightControllerGizmo = new PositionGizmo(this._gizmosLayer);
+            this._rightControllerGizmo.attachedMesh = this.state.showGizmos ? this._rightController : null;
+            this._rightControllerGizmo.scaleRatio = 1.5;
+            this._rightControllerGizmo.planarGizmoEnabled = true;
+            this._rightControllerGizmo.updateGizmoRotationToMatchAttachedMesh = false;
+            this._rightControllerGizmo.updateGizmoPositionToMatchAttachedMesh = true;
+            
+            // Configure gizmo for better interaction
+            this._rightControllerGizmo.xGizmo.dragBehavior.enabled = true;
+            this._rightControllerGizmo.yGizmo.dragBehavior.enabled = true;
+            this._rightControllerGizmo.zGizmo.dragBehavior.enabled = true;
+            
+            this._rightControllerGizmo.onDragStartObservable.add(() => {
+                console.log("Right controller gizmo drag started");
+            });
+            
+            this._rightControllerGizmo.onDragObservable.add(() => {
+                console.log("Right controller position:", this._rightController?.position);
+            });
+            
+            this._rightControllerGizmo.onDragEndObservable.add(() => {
+                console.log("Right controller gizmo drag ended");
+            });
+        }
+
+        // Set initial gizmo visibility based on state
+        if (!this.state.showGizmos) {
+            this._hideGizmos();
+        }
+    }
+
+    private _disposeGizmos(): void {
+        if (this._headsetGizmo) {
+            this._headsetGizmo.dispose();
+            this._headsetGizmo = null;
+        }
+        if (this._leftControllerGizmo) {
+            this._leftControllerGizmo.dispose();
+            this._leftControllerGizmo = null;
+        }
+        if (this._rightControllerGizmo) {
+            this._rightControllerGizmo.dispose();
+            this._rightControllerGizmo = null;
+        }
+        if (this._gizmosLayer) {
+            this._gizmosLayer.dispose();
+            this._gizmosLayer = null;
+        }
+    }
 }
