@@ -61,7 +61,7 @@ export class EditorWebXRSimulator extends Component<IEditorWebXRSimulatorProps, 
     private _leftCamera: Nullable<FreeCamera> = null;
     private _rightCamera: Nullable<FreeCamera> = null;
 
-    private _simulatedSession: any = null;
+
 
     // Simulation helpers
     private _uninstallPolyfill: (() => void) | null = null;
@@ -99,14 +99,28 @@ export class EditorWebXRSimulator extends Component<IEditorWebXRSimulatorProps, 
                 <div className="sticky z-50 top-0 left-0 w-full h-10 bg-primary-foreground">
                     <div className="flex gap-2 items-center px-2 h-full">
                         <Toggle pressed={this.state.enableVR} onPressedChange={(v) => this._setVRPolyfill(v)}>
-                            Enable VR
+                            {this.state.enableVR ? "✅ VR Enabled" : "Enable VR"}
                         </Toggle>
 
-                        <Button variant="ghost" className="!px-2 !py-2" onClick={() => this._toggleImmersiveMode()}>
+                        <Button 
+                            variant="ghost" 
+                            className="!px-2 !py-2" 
+                            onClick={() => this._toggleImmersiveMode()}
+                            disabled={!this.state.enableVR}
+                        >
                             {this.state.immersive ? "Exit VR" : "Enter VR"}
                         </Button>
 
-                        <div className="text-xs text-muted">Drag boxes to move headset / controllers</div>
+                        <div className="text-xs text-muted">
+                            {this.state.enableVR ? "WebXR polyfill active - Drag boxes to move headset / controllers" : "Enable VR to start simulation"}
+                        </div>
+                        
+                        {this.state.enableVR && (
+                            <div className="flex items-center gap-1 text-xs text-green-600">
+                                <div className="w-2 h-2 bg-green-500 rounded-full animate-pulse"></div>
+                                WebXR Ready
+                            </div>
+                        )}
                     </div>
                 </div>
 
@@ -165,6 +179,9 @@ export class EditorWebXRSimulator extends Component<IEditorWebXRSimulatorProps, 
     public componentWillUnmount(): void {
         this._disposeScene();
         this._disablePolyfill();
+        
+        // Remove event listener for preview VR changes
+        window.removeEventListener("preview-vr-changed", this._onPreviewVRChanged);
     }
 
     private async _onGotCanvasRef(canvas: HTMLCanvasElement): Promise<void> {
@@ -212,8 +229,16 @@ export class EditorWebXRSimulator extends Component<IEditorWebXRSimulatorProps, 
 
         // Basic camera (used when not in immersive mode)
         const camera = new FreeCamera("cam", new Vector3(0, 1.6, 3.5), this._scene);
+        camera.setTarget(Vector3.Zero());
         camera.attachControl(canvas, true);
         camera.minZ = 0.01;
+        camera.maxZ = 1000;
+        camera.speed = 0.5;
+        camera.angularSensibility = 2000;
+        camera.inertia = 0.9;
+        
+        // Set as active camera
+        this._scene.activeCamera = camera;
 
         // Stereo cameras (visible only in immersive mode)
         this._leftCamera = new FreeCamera("left_cam", new Vector3(0, 1.6, 3), this._scene);
@@ -233,7 +258,7 @@ export class EditorWebXRSimulator extends Component<IEditorWebXRSimulatorProps, 
             this._scene.render();
         });
 
-        // Pointer drag handlers
+        // Pointer drag handlers - only for VR objects
         canvas.addEventListener("pointerdown", (ev: PointerEvent) => {
             if (!this._scene) {
                 return;
@@ -245,6 +270,7 @@ export class EditorWebXRSimulator extends Component<IEditorWebXRSimulatorProps, 
                     this._dragOffset = pick.pickedPoint.subtract(this._selectedMesh.position);
                 }
                 this._isDragging = true;
+                ev.preventDefault(); // Prevent camera controls when dragging objects
             }
         });
 
@@ -257,9 +283,13 @@ export class EditorWebXRSimulator extends Component<IEditorWebXRSimulatorProps, 
             if (finalPick && finalPick.hit && finalPick.pickedPoint) {
                 this._selectedMesh.position = finalPick.pickedPoint.subtract(this._dragOffset);
             }
+            ev.preventDefault(); // Prevent camera controls when dragging objects
         });
 
-        canvas.addEventListener("pointerup", () => {
+        canvas.addEventListener("pointerup", (ev: PointerEvent) => {
+            if (this._isDragging) {
+                ev.preventDefault(); // Prevent camera controls when finishing drag
+            }
             this._isDragging = false;
             this._selectedMesh = null;
         });
@@ -268,6 +298,9 @@ export class EditorWebXRSimulator extends Component<IEditorWebXRSimulatorProps, 
             e.preventDefault();
         });
 
+        // Listen for preview VR changes to keep simulator in sync
+        window.addEventListener("preview-vr-changed", this._onPreviewVRChanged);
+        
         this.forceUpdate();
     }
 
@@ -404,7 +437,7 @@ export class EditorWebXRSimulator extends Component<IEditorWebXRSimulatorProps, 
 
     private async _toggleImmersiveMode() {
         if (!this.state.immersive) {
-            // Enter immersive: request session (via polyfill if enabled)
+            // Enter immersive: enable VR mode in the main preview panel
             try {
                 if (!(window as any).navigator?.xr) {
                     // If polyfill isn't enabled, enable it temporarily
@@ -412,45 +445,29 @@ export class EditorWebXRSimulator extends Component<IEditorWebXRSimulatorProps, 
                     this.setState({ enableVR: true });
                 }
 
-                const session = await (window as any).navigator.xr.requestSession("immersive-vr");
-                this._simulatedSession = session;
-
-                // keep a reference and listen to end event
-                session.addEventListener("end", () => {
-                    this.setState({ immersive: false });
-                    // restore to mono camera
-                    if (this._scene && this._leftCamera && this._rightCamera) {
-                        this._scene.activeCameras = null;
-                        this._scene.activeCamera = this._leftCamera;
-                        this._scene.cameraToUseForPointers = this._leftCamera;
-                    }
-                });
+                // Trigger VR mode in the main preview panel
+                if (this.props.editor.layout.preview && (this.props.editor.layout.preview as any)._togglePreviewXR) {
+                    await (this.props.editor.layout.preview as any)._togglePreviewXR();
+                }
 
                 this.setState({ immersive: true });
             } catch (e) {
-                console.error("Failed to request XR session", e);
+                console.error("Failed to start preview VR mode", e);
                 // fallback: set immersive true locally
                 this.setState({ immersive: true });
             }
         } else {
             // exit immersive
             try {
-                if (this._simulatedSession && this._simulatedSession.end) {
-                    await this._simulatedSession.end();
+                // Stop VR mode in the main preview panel
+                if (this.props.editor.layout.preview && (this.props.editor.layout.preview as any)._togglePreviewXR) {
+                    await (this.props.editor.layout.preview as any)._togglePreviewXR();
                 }
             } catch (e) {
-                // ignore
+                console.error("Failed to stop preview VR mode", e);
             }
 
             this.setState({ immersive: false });
-            if (this._scene) {
-                // restore mono camera
-                if (this._leftCamera) {
-                    this._scene.activeCamera = this._leftCamera;
-                    this._scene.cameraToUseForPointers = this._leftCamera;
-                    this._scene.activeCameras = null;
-                }
-            }
         }
     }
 
@@ -597,4 +614,12 @@ export class EditorWebXRSimulator extends Component<IEditorWebXRSimulatorProps, 
         this._notifyInputSourcesChange();
         this.forceUpdate();
     }
+
+    private _onPreviewVRChanged = (event: CustomEvent) => {
+        // Sync simulator state with preview VR state
+        const isVRActive = event.detail?.active || false;
+        if (isVRActive !== this.state.immersive) {
+            this.setState({ immersive: isVRActive });
+        }
+    };
 }

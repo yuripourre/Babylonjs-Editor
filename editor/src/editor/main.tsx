@@ -183,6 +183,13 @@ export class Editor extends Component<IEditorProps, IEditorState> {
 						},
 						{
 							global: true,
+							combo: platform() === "darwin" ? "cmd + shift + x" : "ctrl + shift + x",
+							preventDefault: true,
+							label: "Show WebXR Simulator",
+							onKeyDown: () => this.showWebXRSimulator(),
+						},
+						{
+							global: true,
 							combo: "delete",
 							preventDefault: true,
 							label: "Delete Selected Objects",
@@ -208,6 +215,13 @@ export class Editor extends Component<IEditorProps, IEditorState> {
 				<Toaster />
 			</>
 		);
+	}
+
+	/**
+	 * Shows the WebXR simulator tab.
+	 */
+	public showWebXRSimulator(): void {
+		this.layout.selectTab("webxr-simulator");
 	}
 
 	public async componentDidMount(): Promise<void> {

@@ -91,7 +91,7 @@ export class EditorLayout extends Component<IEditorLayoutProps> {
 		"webxr-simulator": <EditorWebXRSimulator editor={this.props.editor} ref={(r) => (this.webxrSimulator = r!)} />,
 	};
 
-	private _layoutVersion: string = "5.0.0-alpha.2";
+	private _layoutVersion: string = "5.0.0-alpha.3";
 
 	public constructor(props: IEditorLayoutProps) {
 		super(props);
@@ -196,7 +196,7 @@ export class EditorLayout extends Component<IEditorLayoutProps> {
 	 * If the tab is hidden, makes it visible and selected.
 	 * @param tabId defines the id of the tab to make active.
 	 */
-	public selectTab(tabId: "graph" | "preview" | "assets-browser" | "console" | "inspector" | (string & {})): void {
+	public selectTab(tabId: "graph" | "preview" | "assets-browser" | "console" | "inspector" | "webxr-simulator" | (string & {})): void {
 		this._layoutRef?.props.model.doAction(Actions.selectTab(tabId));
 	}
 

@@ -1408,6 +1408,9 @@ export class EditorPreview extends Component<IEditorPreviewProps, IEditorPreview
 				this._stopPreviewXR();
 			});
 
+			// Notify other components that VR mode is active
+			window.dispatchEvent(new CustomEvent("preview-vr-changed", { detail: { active: true } }));
+
 			// create two cameras for stereo
 			this._previewXRLeftCamera = new FreeCamera("preview_xr_left", new Vector3(0, 1.6, 0), this.scene);
 			this._previewXRRightCamera = new FreeCamera("preview_xr_right", new Vector3(0, 1.6, 0), this.scene);
@@ -1495,6 +1498,9 @@ export class EditorPreview extends Component<IEditorPreviewProps, IEditorPreview
 
 		this._previewXRSession = null;
 		this._previewXRFrameRequestId = null;
+
+		// Notify other components that VR mode is inactive
+		window.dispatchEvent(new CustomEvent("preview-vr-changed", { detail: { active: false } }));
 	}
 
 	private _togglePreviewXR = async () => {
