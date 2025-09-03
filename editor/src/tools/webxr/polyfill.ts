@@ -198,18 +198,49 @@ export function installSimulatedWebXR(callbacks: ISimulatorCallbacks = {}) {
             }
         };
 
-        // install the polyfill on navigator.xr
-        (win as any).navigator.xr = polyfill;
+        // install the polyfill on navigator.xr using defineProperty to override read-only property
+        try {
+            Object.defineProperty(win.navigator, 'xr', {
+                value: polyfill,
+                writable: true,
+                configurable: true,
+                enumerable: true
+            });
+        } catch (e) {
+            // Fallback: try direct assignment
+            (win as any).navigator.xr = polyfill;
+        }
 
         return () => {
             try {
                 if (originalNavigatorXR) {
-                    (win as any).navigator.xr = originalNavigatorXR;
+                    // Restore original xr property
+                    try {
+                        Object.defineProperty(win.navigator, 'xr', {
+                            value: originalNavigatorXR,
+                            writable: true,
+                            configurable: true,
+                            enumerable: true
+                        });
+                    } catch (e) {
+                        (win as any).navigator.xr = originalNavigatorXR;
+                    }
                 } else if ((win as any).navigator && (win as any).navigator.xr && (win as any).navigator.xr._simulated) {
                     try {
+                        // Try to delete the property
                         delete (win as any).navigator.xr;
                     } catch (e) {
-                        (win as any).navigator.xr = undefined;
+                        // If deletion fails, set to undefined
+                        try {
+                            Object.defineProperty(win.navigator, 'xr', {
+                                value: undefined,
+                                writable: true,
+                                configurable: true,
+                                enumerable: true
+                            });
+                        } catch (e2) {
+                            (win as any).navigator.xr = undefined;
+                        }
                     }
                 }
             } catch (e) {
