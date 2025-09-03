@@ -173,6 +173,7 @@ export class EditorPreview extends Component<IEditorPreviewProps, IEditorPreview
 	private _previewXRLeftCamera: FreeCamera | null = null;
 	private _previewXRRightCamera: FreeCamera | null = null;
 	private _previewXRFrameRequestId: number | null = null;
+	private _isStoppingPreviewXR: boolean = false;
 
 	private _renderScene: boolean = true;
 	private _mouseDownPosition: Vector2 = Vector2.Zero();
@@ -1207,7 +1208,9 @@ export class EditorPreview extends Component<IEditorPreviewProps, IEditorPreview
 			this._previewXRSession = session;
 
 			session.addEventListener("end", () => {
-				this._stopPreviewXR();
+				if (!this._isStoppingPreviewXR) {
+					this._stopPreviewXR();
+				}
 			});
 
 			// Notify other components that VR mode is active
@@ -1264,6 +1267,12 @@ export class EditorPreview extends Component<IEditorPreviewProps, IEditorPreview
 	}
 
 	private async _stopPreviewXR(): Promise<void> {
+		if (this._isStoppingPreviewXR) {
+			return; // Prevent recursive calls
+		}
+		
+		this._isStoppingPreviewXR = true;
+		
 		try {
 			if (this._previewXRFrameRequestId !== null && this._previewXRSession && this._previewXRSession.cancelAnimationFrame) {
 				this._previewXRSession.cancelAnimationFrame(this._previewXRFrameRequestId);
@@ -1300,6 +1309,7 @@ export class EditorPreview extends Component<IEditorPreviewProps, IEditorPreview
 
 		this._previewXRSession = null;
 		this._previewXRFrameRequestId = null;
+		this._isStoppingPreviewXR = false;
 
 		// Notify other components that VR mode is inactive
 		window.dispatchEvent(new CustomEvent("preview-vr-changed", { detail: { active: false } }));
