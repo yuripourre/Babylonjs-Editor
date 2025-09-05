@@ -13,10 +13,8 @@ import { LuMove3D, LuRotate3D, LuScale3D } from "react-icons/lu";
 
 import {
 	AbstractEngine,
-	AbstractMesh,
 	Animation,
 	Camera,
-	Color3,
 	CubicEase,
 	EasingFunction,
 	Engine,
@@ -54,7 +52,7 @@ import { waitNextAnimationFrame, waitUntil } from "../../tools/tools";
 import { ITweenConfiguration, Tween } from "../../tools/animation/tween";
 import { checkProjectCachedCompressedTextures } from "../../tools/assets/ktx";
 import { createSceneLink, getRootSceneLink } from "../../tools/scene/scene-link";
-import { isAbstractMesh, isCamera, isCollisionInstancedMesh, isCollisionMesh, isInstancedMesh, isLight, isMesh, isTransformNode } from "../../tools/guards/nodes";
+import { isAbstractMesh, isCamera, isCollisionInstancedMesh, isCollisionMesh, isLight, isTransformNode } from "../../tools/guards/nodes";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger } from "../../ui/shadcn/ui/dropdown-menu";
 
 import { EditorCamera } from "../nodes/camera";
@@ -73,6 +71,7 @@ import { defaultPipelineCameraConfigurations, disposeDefaultRenderingPipeline, p
 import { EditorGraphContextMenu } from "./graph/graph";
 
 import { EditorPreviewGizmo } from "./preview/gizmo";
+import { HighlightManager } from "./preview/highlight";
 import { EditorPreviewIcons } from "./preview/icons";
 import { EditorPreviewPlayComponent } from "./preview/play";
 
@@ -160,6 +159,11 @@ export class EditorPreview extends Component<IEditorPreviewProps, IEditorPreview
 	public play: EditorPreviewPlayComponent;
 
 	/**
+	 * The highlight manager of the preview.
+	 */
+	public highlight: HighlightManager;
+
+	/**
 	 * The current statistics of the preview.
 	 * This is used to display the FPS and other values.
 	 */
@@ -167,8 +171,6 @@ export class EditorPreview extends Component<IEditorPreviewProps, IEditorPreview
 
 	private _renderScene: boolean = true;
 	private _mouseDownPosition: Vector2 = Vector2.Zero();
-
-	private _meshUnderPointer: AbstractMesh | null;
 
 	public constructor(props: IEditorPreviewProps) {
 		super(props);
@@ -184,6 +186,8 @@ export class EditorPreview extends Component<IEditorPreviewProps, IEditorPreview
 
 			playSceneLoadingProgress: 0,
 		};
+
+		this.highlight = new HighlightManager();
 
 		ipcRenderer.on("gizmo:position", () => this.setActiveGizmo("position"));
 		ipcRenderer.on("gizmo:rotation", () => this.setActiveGizmo("rotation"));
@@ -547,8 +551,8 @@ export class EditorPreview extends Component<IEditorPreviewProps, IEditorPreview
 	}
 
 	private _handleMouseLeave(): void {
-		this._restoreCurrentMeshUnderPointer();
-		this._meshUnderPointer = null;
+		this.highlight.restoreCurrentMeshUnderPointer();
+		this.highlight.clearMeshUnderPointer();
 	}
 
 	private _mouseMoveTimeoutId: number = -1;
@@ -561,11 +565,11 @@ export class EditorPreview extends Component<IEditorPreviewProps, IEditorPreview
 		const pickingInfo = this._getPickingInfo(x, y);
 		const mesh = pickingInfo.pickedMesh?._masterMesh ?? pickingInfo.pickedMesh;
 
-		if (mesh && this._meshUnderPointer !== mesh && !isNodeLocked(mesh)) {
-			this._restoreCurrentMeshUnderPointer();
-			this._highlightCurrentMeshUnderPointer(mesh);
+		if (mesh && this.highlight.meshUnderPointer !== mesh && !isNodeLocked(mesh)) {
+			this.highlight.restoreCurrentMeshUnderPointer();
+			this.highlight.highlightCurrentMeshUnderPointer(mesh);
 
-			this._meshUnderPointer = mesh;
+			this.highlight.meshUnderPointer = mesh;
 
 			if (this._mouseMoveTimeoutId) {
 				clearTimeout(this._mouseMoveTimeoutId);
@@ -586,12 +590,12 @@ export class EditorPreview extends Component<IEditorPreviewProps, IEditorPreview
 
 		if (event.button === 2) {
 			this.setState({
-				rightClickedObject: this._meshUnderPointer,
+				rightClickedObject: this.highlight.meshUnderPointer,
 			});
 		}
 
-		this._restoreCurrentMeshUnderPointer();
-		this._meshUnderPointer = null;
+		this.highlight.restoreCurrentMeshUnderPointer();
+		this.highlight.clearMeshUnderPointer();
 
 		if (event.button === 2) {
 			this.scene.activeCamera?.inputs.detachElement();
@@ -674,60 +678,6 @@ export class EditorPreview extends Component<IEditorPreviewProps, IEditorPreview
 		}
 	}
 
-	private _highlightCurrentMeshUnderPointer(pickedMesh: AbstractMesh): void {
-		Tween.killTweensOf(pickedMesh);
-
-		const effectiveMesh = isInstancedMesh(pickedMesh) ? pickedMesh.sourceMesh : pickedMesh;
-
-		const meshes = [effectiveMesh];
-
-		if (isMesh(effectiveMesh)) {
-			effectiveMesh.getLODLevels().forEach((lod) => {
-				if (lod.mesh) {
-					meshes.push(lod.mesh);
-				}
-			});
-		}
-
-		meshes.forEach((mesh) => {
-			Tween.create(mesh, 0.1, {
-				overlayAlpha: 0.5,
-				overlayColor: Color3.Black(),
-				onStart: () => (mesh!.renderOverlay = true),
-			});
-		});
-	}
-
-	private _restoreCurrentMeshUnderPointer(): void {
-		const mesh = this._meshUnderPointer;
-
-		if (mesh) {
-			const effectiveMesh = isInstancedMesh(mesh) ? mesh.sourceMesh : mesh;
-
-			const meshes = [effectiveMesh];
-
-			if (isMesh(effectiveMesh)) {
-				effectiveMesh.getLODLevels().forEach((lod) => {
-					if (lod.mesh) {
-						meshes.push(lod.mesh);
-					}
-				});
-			}
-
-			meshes.forEach((mesh) => {
-				Tween.killTweensOf(mesh);
-
-				mesh.overlayAlpha ??= 0;
-				mesh.overlayColor ??= Color3.Black();
-
-				Tween.create(mesh, 0.1, {
-					overlayAlpha: 0,
-					overlayColor: Color3.Black(),
-					onStart: () => (mesh.renderOverlay = true),
-				});
-			});
-		}
-	}
 
 	private _getToolbar(): ReactNode {
 		return (
