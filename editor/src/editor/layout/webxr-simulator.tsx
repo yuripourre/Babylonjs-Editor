@@ -1,14 +1,16 @@
-import { Component, ReactNode } from "react";
+import { Component, ReactNode, MouseEvent } from "react";
 
 import { Editor } from "../main";
 
 import { Toggle } from "../../ui/shadcn/ui/toggle";
 import { Button } from "../../ui/shadcn/ui/button";
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "../../ui/shadcn/ui/tooltip";
+import { ToolbarRadioGroup, ToolbarRadioGroupItem } from "../../ui/shadcn/ui/toolbar-radio-group";
+import { Separator } from "../../ui/shadcn/ui/separator";
 
 import {
     Engine,
     Scene,
-    FreeCamera,
     Vector3,
     MeshBuilder,
     HemisphericLight,
@@ -18,11 +20,20 @@ import {
     AbstractMesh,
     Nullable,
     PositionGizmo,
+    RotationGizmo,
+    ScaleGizmo,
     UtilityLayerRenderer,
-    PointerEventTypes,
+    PickingInfo,
+    Vector2,
 } from "babylonjs";
 
+import { EditorCamera } from "../nodes/camera";
+
+import { GiArrowCursor } from "react-icons/gi";
+import { LuMove3D, LuRotate3D, LuScale3D } from "react-icons/lu";
+
 import { installSimulatedWebXR, ISimulatedGamepad } from "../../tools/webxr/polyfill";
+import { EditorGraphContextMenu } from "./graph/graph";
 
 export interface IEditorWebXRSimulatorProps {
     editor: Editor;
@@ -32,6 +43,10 @@ export interface IEditorWebXRSimulatorState {
     enableVR: boolean;
     previewVR: boolean;
     showGizmos: boolean;
+    activeGizmo: "none" | "position" | "rotation" | "scaling";
+    pickingEnabled: boolean;
+    rightClickedObject: Nullable<AbstractMesh>;
+    isFocused: boolean;
 }
 
 /**
@@ -58,14 +73,14 @@ export class EditorWebXRSimulator extends Component<IEditorWebXRSimulatorProps, 
     private _rightController: Nullable<AbstractMesh> = null;
 
     private _selectedMesh: Nullable<AbstractMesh> = null;
-    private _dragOffset: Vector3 = Vector3.Zero();
-    private _isDragging: boolean = false;
+    private _mouseDownPosition: Vector2 = Vector2.Zero();
+    private _meshUnderPointer: AbstractMesh | null = null;
 
     // Gizmos
     private _gizmosLayer: UtilityLayerRenderer | null = null;
-    private _headsetGizmo: PositionGizmo | null = null;
-    private _leftControllerGizmo: PositionGizmo | null = null;
-    private _rightControllerGizmo: PositionGizmo | null = null;
+    private _headsetGizmo: PositionGizmo | RotationGizmo | ScaleGizmo | null = null;
+    private _leftControllerGizmo: PositionGizmo | RotationGizmo | ScaleGizmo | null = null;
+    private _rightControllerGizmo: PositionGizmo | RotationGizmo | ScaleGizmo | null = null;
 
     // Simulation helpers
     private _uninstallPolyfill: (() => void) | null = null;
@@ -95,55 +110,36 @@ export class EditorWebXRSimulator extends Component<IEditorWebXRSimulatorProps, 
             enableVR: false,
             previewVR: false,
             showGizmos: true,
+            activeGizmo: "position",
+            pickingEnabled: true,
+            rightClickedObject: null,
+            isFocused: false,
         };
     }
 
     public render(): ReactNode {
         return (
             <div className="relative w-full h-full text-foreground">
-                <div className="sticky z-50 top-0 left-0 w-full h-10 bg-primary-foreground">
-                    <div className="flex gap-2 items-center px-2 h-full">
-                        <Toggle pressed={this.state.enableVR} onPressedChange={(v) => this._setVRPolyfill(v)}>
-                            {this.state.enableVR ? "✅ VR Enabled" : "Enable VR"}
-                        </Toggle>
+                <div className="flex flex-col w-full h-full">
+                    {this._getToolbar()}
 
-                        <Button 
-                            variant="ghost" 
-                            className="!px-2 !py-2" 
-                            onClick={() => this._togglePreviewVR()}
-                            disabled={!this.state.enableVR}
-                        >
-                            {this.state.previewVR ? "Exit Preview VR" : "Enter Preview VR"}
-                        </Button>
-
-                        <Toggle pressed={this.state.showGizmos} onPressedChange={(v) => this._toggleGizmos(v)}>
-                            {this.state.showGizmos ? "🎯 Gizmos On" : "Gizmos Off"}
-                        </Toggle>
-                        {this.state.enableVR && (
-                            <div className="text-xs text-gray-500">
-                                Press 'G' to toggle gizmos
-                            </div>
-                        )}
-
-                                        <div className="text-xs text-muted">
-                    {this.state.enableVR ? "WebXR polyfill active - Use gizmos to move VR objects" : "Enable VR to start simulation"}
+                    <EditorGraphContextMenu editor={this.props.editor} object={this.state.rightClickedObject} onOpenChange={(o) => !o && this._resetPointerContextInfo()}>
+                        <canvas
+                            ref={(r) => this._onGotCanvasRef(r!)}
+                            onBlur={() => this.setState({ isFocused: false })}
+                            onFocus={() => this.setState({ isFocused: true })}
+                            onPointerUp={(ev) => this._handleMouseUp(ev)}
+                            onPointerDown={(ev) => this._handleMouseDown(ev)}
+                            onMouseLeave={() => this._handleMouseLeave()}
+                            onMouseMove={() => this._handleMouseMove(this._scene?.pointerX || 0, this._scene?.pointerY || 0)}
+                            className={`
+                                select-none outline-none w-full h-full object-contain
+                                bg-background
+                                transition-all duration-300 ease-in-out
+                            `}
+                        />
+                    </EditorGraphContextMenu>
                 </div>
-                {this.state.enableVR && this.state.showGizmos && (
-                    <div className="text-xs text-blue-600 mt-1">
-                        🎯 Click and drag gizmo arrows to move objects
-                    </div>
-                )}
-                        
-                        {this.state.enableVR && (
-                            <div className="flex items-center gap-1 text-xs text-green-600">
-                                <div className="w-2 h-2 bg-green-500 rounded-full animate-pulse"></div>
-                                WebXR Ready
-                            </div>
-                        )}
-                    </div>
-                </div>
-
-                <canvas ref={(r) => this._onGotCanvasRef(r!)} className="w-full h-full select-none" />
 
                 {/* Controller emulation UI */}
                 <div className="absolute top-12 right-2 z-50 w-80 p-3 rounded bg-background/80 backdrop-blur">
@@ -200,9 +196,88 @@ export class EditorWebXRSimulator extends Component<IEditorWebXRSimulatorProps, 
         this._disposeScene();
         this._disablePolyfill();
         
-        // Remove event listener for preview VR changes
+        // Remove event listeners
         window.removeEventListener("preview-vr-changed", this._onPreviewVRChanged);
         window.removeEventListener("keydown", this._onKeyDown);
+        window.removeEventListener("resize", this._onWindowResize);
+    }
+
+    private _getToolbar(): ReactNode {
+        return (
+            <div className="absolute top-0 left-0 w-full h-12 z-10">
+                <div className="flex justify-between items-center gap-4 h-full bg-background/95 w-full px-2 py-1">
+                    <div className="flex gap-2 items-center h-10">
+                        <Toggle pressed={this.state.enableVR} onPressedChange={(v) => this._setVRPolyfill(v)}>
+                            {this.state.enableVR ? "✅ VR Enabled" : "Enable VR"}
+                        </Toggle>
+
+                        <Button 
+                            variant="ghost" 
+                            className="!px-2 !py-2" 
+                            onClick={() => this._togglePreviewVR()}
+                            disabled={!this.state.enableVR}
+                        >
+                            {this.state.previewVR ? "Exit Preview VR" : "Enter Preview VR"}
+                        </Button>
+
+                        <Separator orientation="vertical" className="mx-1 h-[24px]" />
+
+                        <TooltipProvider>
+                            <ToolbarRadioGroup
+                                value={this.state.activeGizmo === "none" ? "select" : this.state.activeGizmo}
+                                onValueChange={(value) => {
+                                    if (value === "select") {
+                                        this.setActiveGizmo("none");
+                                    } else {
+                                        this.setActiveGizmo(value as "position" | "rotation" | "scaling");
+                                    }
+                                }}
+                            >
+                                <Tooltip>
+                                    <TooltipTrigger asChild>
+                                        <ToolbarRadioGroupItem value="select" className={this.state.activeGizmo === "none" ? "bg-primary/20" : ""}>
+                                            <GiArrowCursor className="h-4 w-4" />
+                                        </ToolbarRadioGroupItem>
+                                    </TooltipTrigger>
+                                    <TooltipContent>Select mode</TooltipContent>
+                                </Tooltip>
+                                <Tooltip>
+                                    <TooltipTrigger asChild>
+                                        <ToolbarRadioGroupItem value="position" className={this.state.activeGizmo === "position" ? "bg-primary/20" : ""}>
+                                            <LuMove3D height={16} />
+                                        </ToolbarRadioGroupItem>
+                                    </TooltipTrigger>
+                                    <TooltipContent>Toggle position gizmo</TooltipContent>
+                                </Tooltip>
+                                <Tooltip>
+                                    <TooltipTrigger asChild>
+                                        <ToolbarRadioGroupItem value="rotation" className={this.state.activeGizmo === "rotation" ? "bg-primary/20" : ""}>
+                                            <LuRotate3D height={16} />
+                                        </ToolbarRadioGroupItem>
+                                    </TooltipTrigger>
+                                    <TooltipContent>Toggle rotation gizmo</TooltipContent>
+                                </Tooltip>
+                                <Tooltip>
+                                    <TooltipTrigger asChild>
+                                        <ToolbarRadioGroupItem value="scaling" className={this.state.activeGizmo === "scaling" ? "bg-primary/20" : ""}>
+                                            <LuScale3D height={16} />
+                                        </ToolbarRadioGroupItem>
+                                    </TooltipTrigger>
+                                    <TooltipContent>Toggle scaling gizmo</TooltipContent>
+                                </Tooltip>
+                            </ToolbarRadioGroup>
+                        </TooltipProvider>
+
+                        {this.state.enableVR && (
+                            <div className="flex items-center gap-1 text-xs text-green-600">
+                                <div className="w-2 h-2 bg-green-500 rounded-full animate-pulse"></div>
+                                WebXR Ready
+                            </div>
+                        )}
+                    </div>
+                </div>
+            </div>
+        );
     }
 
     private async _onGotCanvasRef(canvas: HTMLCanvasElement): Promise<void> {
@@ -214,9 +289,18 @@ export class EditorWebXRSimulator extends Component<IEditorWebXRSimulatorProps, 
             antialias: true,
             audioEngine: false,
             adaptToDeviceRatio: true,
+            disableWebGL2Support: false,
+            useHighPrecisionFloats: true,
+            useHighPrecisionMatrix: true,
+            powerPreference: "high-performance",
+            failIfMajorPerformanceCaveat: false,
+            useExactSrgbConversions: true,
         });
 
+        this._engine.disableContextMenu = false;
+
         this._scene = new Scene(this._engine);
+        this._scene.autoClear = true;
 
         const light = new HemisphericLight("light", new Vector3(0, 1, 0), this._scene);
         light.intensity = 0.9;
@@ -226,6 +310,7 @@ export class EditorWebXRSimulator extends Component<IEditorWebXRSimulatorProps, 
         groundMat.diffuseColor = new Color3(0.4, 0.4, 0.45);
         const ground = MeshBuilder.CreateGround("ground", { width: 10, height: 10 }, this._scene);
         ground.material = groundMat;
+        ground.isPickable = false; // Don't pick the ground
 
         // Headset box
         this._headset = MeshBuilder.CreateBox("webxr_headset", { size: 0.26 }, this._scene);
@@ -233,6 +318,8 @@ export class EditorWebXRSimulator extends Component<IEditorWebXRSimulatorProps, 
         headsetMat.diffuseColor = new Color3(0.2, 0.6, 1);
         this._headset.material = headsetMat;
         this._headset.position = new Vector3(0, 1.6, 0);
+        this._headset.isPickable = true;
+        console.log("Created headset mesh:", this._headset.name, "position:", this._headset.position, "isPickable:", this._headset.isPickable);
 
         // Left controller
         this._leftController = MeshBuilder.CreateBox("webxr_left_ctrl", { size: 0.12 }, this._scene);
@@ -240,6 +327,8 @@ export class EditorWebXRSimulator extends Component<IEditorWebXRSimulatorProps, 
         leftMat.diffuseColor = new Color3(0, 1, 0.5);
         this._leftController.material = leftMat;
         this._leftController.position = new Vector3(-0.3, 1.4, -0.4);
+        this._leftController.isPickable = true;
+        console.log("Created left controller mesh:", this._leftController.name, "position:", this._leftController.position, "isPickable:", this._leftController.isPickable);
 
         // Right controller
         this._rightController = MeshBuilder.CreateBox("webxr_right_ctrl", { size: 0.12 }, this._scene);
@@ -247,78 +336,36 @@ export class EditorWebXRSimulator extends Component<IEditorWebXRSimulatorProps, 
         rightMat.diffuseColor = new Color3(1, 0.35, 0.35);
         this._rightController.material = rightMat;
         this._rightController.position = new Vector3(0.3, 1.4, -0.4);
+        this._rightController.isPickable = true;
+        console.log("Created right controller mesh:", this._rightController.name, "position:", this._rightController.position, "isPickable:", this._rightController.isPickable);
 
-        // Basic camera (used when not in immersive mode)
-        const camera = new FreeCamera("cam", new Vector3(0, 1.6, 3.5), this._scene);
-        camera.setTarget(Vector3.Zero());
-        camera.attachControl(canvas, true);
+        // Basic camera (used when not in immersive mode) - use EditorCamera like preview tab
+        const camera = new EditorCamera("cam", Vector3.Zero(), this._scene);
+        
+        // Attach camera control like the preview tab does
+        camera.attachControl(true);
+        
         camera.minZ = 0.01;
         camera.maxZ = 1000;
         camera.speed = 0.5;
         camera.angularSensibility = 2000;
         camera.inertia = 0.9;
         
-        // Camera is configured for basic interaction
+        // Position camera to look at the VR objects
+        camera.position = new Vector3(0, 1.6, 3.5);
+        camera.setTarget(Vector3.Zero());
         
         // Set as active camera
         this._scene.activeCamera = camera;
+        this._scene.cameraToUseForPointers = camera;
+        
+        console.log("Camera setup complete:", camera.name, "position:", camera.position, "target:", camera.getTarget());
 
         // Create gizmos for VR objects
         this._createGizmos();
 
-        // Add scene pointer event handling to prioritize gizmo interactions
-        this._scene.onPointerObservable.add((pointerInfo) => {
-            if (this._scene && this.state.showGizmos) {
-                // Get the canvas element to calculate proper coordinates
-                const canvas = this._scene.getEngine().getRenderingCanvas();
-                if (canvas) {
-                    // Use the scene's built-in coordinate calculation
-                    const x = pointerInfo.event.offsetX;
-                    const y = pointerInfo.event.offsetY;
-                    
-                    console.log("Pointer event:", {
-                        type: pointerInfo.type,
-                        clientX: pointerInfo.event.clientX,
-                        clientY: pointerInfo.event.clientY,
-                        offsetX: pointerInfo.event.offsetX,
-                        offsetY: pointerInfo.event.offsetY,
-                        canvasWidth: canvas.width,
-                        canvasHeight: canvas.height
-                    });
-                    
-                    if (pointerInfo.type === PointerEventTypes.POINTERDOWN) {
-                        // Check both main scene and utility layer for gizmo picks
-                        const mainPickInfo = this._scene.pick(x, y);
-                        const utilityPickInfo = this._gizmosLayer ? this._gizmosLayer.utilityLayerScene.pick(x, y) : null;
-                        
-                        console.log("Pick results:", {
-                            mainPick: mainPickInfo ? { hit: mainPickInfo.hit, meshName: mainPickInfo.pickedMesh?.name } : null,
-                            utilityPick: utilityPickInfo ? { hit: utilityPickInfo.hit, meshName: utilityPickInfo.pickedMesh?.name } : null
-                        });
-                        
-                        const pickInfo = utilityPickInfo && utilityPickInfo.hit ? utilityPickInfo : mainPickInfo;
-                        
-                        if (pickInfo && pickInfo.hit && pickInfo.pickedMesh) {
-                            // Check if we're picking a gizmo
-                            const meshName = pickInfo.pickedMesh.name;
-                            if (meshName.includes("gizmo") || meshName.includes("Gizmo")) {
-                                console.log("Gizmo picked:", meshName, "at coordinates:", x, y);
-                                // Disable camera controls temporarily
-                                if (this._scene.activeCamera) {
-                                    this._scene.activeCamera.detachControl();
-                                }
-                                return;
-                            }
-                        }
-                    } else if (pointerInfo.type === PointerEventTypes.POINTERUP) {
-                        // Re-enable camera controls when pointer is released
-                        if (this._scene.activeCamera) {
-                            this._scene.activeCamera.attachControl(canvas, true);
-                        }
-                    }
-                }
-            }
-        });
+        // Gizmos will now work automatically since we're sharing the same camera instance
+        // No need for complex pointer event handling
 
         // Simulator always uses single camera - no stereo cameras needed
 
@@ -328,15 +375,18 @@ export class EditorWebXRSimulator extends Component<IEditorWebXRSimulatorProps, 
                 return;
             }
 
-            // Ensure utility layer camera stays in sync with main camera
-            if (this._gizmosLayer && this._gizmosLayer.utilityLayerScene) {
-                this._gizmosLayer.utilityLayerScene.activeCamera = this._scene.activeCamera;
-                
-                // Keep viewport synchronized
-                const mainCamera = this._scene.activeCamera;
+            // VR object positions are updated automatically through the pose getter methods
+            
+            // Ensure gizmo utility layer stays in sync with main scene
+            if (this._gizmosLayer && this._scene.activeCamera) {
+                // Keep the utility layer camera in sync with the main camera
                 const utilityCamera = this._gizmosLayer.utilityLayerScene.activeCamera;
-                if (mainCamera && utilityCamera) {
-                    utilityCamera.viewport = mainCamera.viewport.clone();
+                if (utilityCamera) {
+                    // Copy position from main camera to utility camera
+                    utilityCamera.position.copyFrom(this._scene.activeCamera.position);
+                    
+                    // Ensure viewport is synchronized
+                    utilityCamera.viewport = this._scene.activeCamera.viewport.clone();
                 }
             }
 
@@ -344,51 +394,23 @@ export class EditorWebXRSimulator extends Component<IEditorWebXRSimulatorProps, 
             this._scene.render();
         });
 
-        // Pointer drag handlers - only for VR objects
-        canvas.addEventListener("pointerdown", (ev: PointerEvent) => {
-            if (!this._scene) {
-                return;
-            }
-            const pick = this._scene.pick(ev.offsetX, ev.offsetY);
-            if (pick && pick.hit && pick.pickedMesh && (pick.pickedMesh === this._headset || pick.pickedMesh === this._leftController || pick.pickedMesh === this._rightController)) {
-                this._selectedMesh = pick.pickedMesh;
-                if (pick.pickedPoint && this._selectedMesh.position) {
-                    this._dragOffset = pick.pickedPoint.subtract(this._selectedMesh.position);
-                }
-                this._isDragging = true;
-                ev.preventDefault(); // Prevent camera controls when dragging objects
-            }
-        });
-
-        canvas.addEventListener("pointermove", (ev: PointerEvent) => {
-            if (!this._isDragging || !this._scene || !this._selectedMesh) {
-                return;
-            }
-            const pick = this._scene.pick(ev.offsetX, ev.offsetY, (m) => m === ground);
-            const finalPick = pick && pick.hit && pick.pickedPoint ? pick : this._scene.pick(ev.offsetX, ev.offsetY);
-            if (finalPick && finalPick.hit && finalPick.pickedPoint) {
-                this._selectedMesh.position = finalPick.pickedPoint.subtract(this._dragOffset);
-            }
-            ev.preventDefault(); // Prevent camera controls when dragging objects
-        });
-
-        canvas.addEventListener("pointerup", (ev: PointerEvent) => {
-            if (this._isDragging) {
-                ev.preventDefault(); // Prevent camera controls when finishing drag
-            }
-            this._isDragging = false;
-            this._selectedMesh = null;
-        });
+        // Note: Pointer events are now handled by React event handlers
+        // This ensures proper coordinate mapping like the preview panel
 
         canvas.addEventListener("contextmenu", (e) => {
             e.preventDefault();
         });
+
+        // Note: Mouse events are now handled by React event handlers on the canvas element
 
         // Listen for preview VR changes to keep simulator in sync
         window.addEventListener("preview-vr-changed", this._onPreviewVRChanged);
         
         // Add keyboard event listener for gizmo toggle
         window.addEventListener("keydown", this._onKeyDown);
+        
+        // Add window resize listener to maintain canvas aspect ratio
+        window.addEventListener("resize", this._onWindowResize);
         
         this.forceUpdate();
     }
@@ -686,6 +708,172 @@ export class EditorWebXRSimulator extends Component<IEditorWebXRSimulatorProps, 
         }
     };
 
+    private _onWindowResize = (): void => {
+        if (this._engine) {
+            // Resize the engine to maintain proper aspect ratio (like preview panel)
+            this._engine.resize();
+            
+            // Ensure the gizmo utility layer is also properly resized
+            if (this._scene && this._gizmosLayer && this._scene.activeCamera) {
+                // Update utility layer camera viewport to match main camera
+                const utilityCamera = this._gizmosLayer.utilityLayerScene.activeCamera;
+                if (utilityCamera) {
+                    utilityCamera.viewport = this._scene.activeCamera.viewport.clone();
+                }
+            }
+        }
+    };
+
+    private _handleMouseMove(x: number, y: number): void {
+        if (!this.state.pickingEnabled || !this._scene) {
+            return;
+        }
+
+        console.log("Mouse move at:", x, y, "scene pointer:", this._scene.pointerX, this._scene.pointerY);
+
+        const pickingInfo = this._getPickingInfo(x, y);
+        const mesh = pickingInfo.pickedMesh;
+
+        if (mesh && this._meshUnderPointer !== mesh) {
+            this._restoreCurrentMeshUnderPointer();
+            this._highlightCurrentMeshUnderPointer(mesh);
+            this._meshUnderPointer = mesh;
+        }
+    }
+
+    private _handleMouseDown(event: MouseEvent<HTMLCanvasElement, globalThis.MouseEvent>): void {
+        if (!this.state.pickingEnabled || !this._scene) {
+            return;
+        }
+
+        this._mouseDownPosition.set(event.clientX, event.clientY);
+
+        if (event.button === 2) {
+            this.setState({
+                rightClickedObject: this._meshUnderPointer,
+            });
+        }
+
+        this._restoreCurrentMeshUnderPointer();
+        this._meshUnderPointer = null;
+
+        if (event.button === 2) {
+            this._scene.activeCamera?.inputs.detachElement();
+            this._handleMouseUp(event);
+        }
+    }
+
+    private _handleMouseUp(event: MouseEvent<HTMLCanvasElement, globalThis.MouseEvent>): void {
+        if (!this.state.pickingEnabled || !this._scene) {
+            return;
+        }
+
+        if (event.altKey || event.button === 1) {
+            return;
+        }
+
+        const distance = Vector2.Distance(this._mouseDownPosition, new Vector2(event.clientX, event.clientY));
+
+        if (distance > 2) {
+            return;
+        }
+
+        const pickingInfo = this._getPickingInfo(this._scene.pointerX, this._scene.pointerY);
+        const mesh = pickingInfo.pickedMesh;
+
+        console.log("Mouse up at:", this._scene.pointerX, this._scene.pointerY, "picked:", mesh?.name);
+
+        if (mesh && (mesh === this._headset || mesh === this._leftController || mesh === this._rightController)) {
+            console.log("Setting selected mesh:", mesh.name);
+            this._setSelectedMesh(mesh);
+        }
+    }
+
+    private _handleMouseLeave(): void {
+        this._restoreCurrentMeshUnderPointer();
+        this._meshUnderPointer = null;
+    }
+
+    private _resetPointerContextInfo(): void {
+        this.setState({ rightClickedObject: null });
+    }
+
+    private _getPickingInfo(x: number, y: number): PickingInfo {
+        if (!this._scene) {
+            console.log("No scene available for picking");
+            return { hit: false } as PickingInfo;
+        }
+
+        console.log("Picking at coordinates:", x, y);
+        console.log("Scene active camera:", this._scene.activeCamera?.name);
+        console.log("Available meshes:", this._scene.meshes.map(m => m.name));
+
+        // Try picking without filter first to see if picking works at all
+        const allPick = this._scene.pick(x, y);
+        console.log("All pick result:", allPick.hit, allPick.pickedMesh?.name);
+
+        // Use the same picking logic as preview tab but filter for our VR objects
+        const meshPick = this._scene.pick(
+            x,
+            y,
+            (m) => {
+                const isVRMesh = (m === this._headset || m === this._leftController || m === this._rightController);
+                console.log("Checking mesh:", m.name, "isVRMesh:", isVRMesh, "isVisible:", m.isVisible, "isEnabled:", m.isEnabled());
+                return m.isVisible && m.isEnabled() && isVRMesh;
+            },
+            false
+        );
+
+        console.log("VR mesh pick result:", meshPick.hit, meshPick.pickedMesh?.name);
+
+        return meshPick;
+    }
+
+    private _restoreCurrentMeshUnderPointer(): void {
+        if (this._meshUnderPointer) {
+            // Restore original material if needed
+            this._meshUnderPointer = null;
+        }
+    }
+
+    private _highlightCurrentMeshUnderPointer(_mesh: AbstractMesh): void {
+        // Add highlighting logic if needed
+    }
+
+    private _setSelectedMesh(mesh: AbstractMesh): void {
+        this._selectedMesh = mesh;
+        
+        // Update gizmos based on active gizmo type
+        if (this.state.activeGizmo !== "none") {
+            this._updateGizmosForMesh(mesh);
+        }
+    }
+
+    private _updateGizmosForMesh(mesh: AbstractMesh): void {
+        if (!this._gizmosLayer || this.state.activeGizmo === "none") return;
+
+        // Hide all gizmos first
+        if (this._headsetGizmo) this._headsetGizmo.attachedMesh = null;
+        if (this._leftControllerGizmo) this._leftControllerGizmo.attachedMesh = null;
+        if (this._rightControllerGizmo) this._rightControllerGizmo.attachedMesh = null;
+
+        // Show appropriate gizmo based on selected mesh and active gizmo type
+        if (mesh === this._headset && this._headsetGizmo) {
+            this._headsetGizmo.attachedMesh = this._headset;
+        } else if (mesh === this._leftController && this._leftControllerGizmo) {
+            this._leftControllerGizmo.attachedMesh = this._leftController;
+        } else if (mesh === this._rightController && this._rightControllerGizmo) {
+            this._rightControllerGizmo.attachedMesh = this._rightController;
+        }
+    }
+
+    public setActiveGizmo(gizmo: "none" | "position" | "rotation" | "scaling"): void {
+        this.setState({ activeGizmo: gizmo });
+        
+        // Recreate gizmos with new type
+        this._updateGizmoTypes();
+    }
+
     private _toggleGizmos(show: boolean): void {
         this.setState({ showGizmos: show });
         
@@ -713,116 +901,98 @@ export class EditorWebXRSimulator extends Component<IEditorWebXRSimulatorProps, 
             return;
         }
 
-        // Create gizmos layer with proper configuration for interaction
+        // Create gizmos layer with proper camera synchronization
         this._gizmosLayer = new UtilityLayerRenderer(this._scene);
-        this._gizmosLayer.utilityLayerScene.autoClearDepthAndStencil = true;
-        this._gizmosLayer.utilityLayerScene.autoClear = false;
+        this._gizmosLayer.utilityLayerScene.postProcessesEnabled = false;
         
-        // Ensure the gizmos layer can receive pointer events
-        this._gizmosLayer.utilityLayerScene.pointerMovePredicate = () => true;
-        this._gizmosLayer.utilityLayerScene.pointerDownPredicate = () => true;
-        this._gizmosLayer.utilityLayerScene.pointerUpPredicate = () => true;
-        
-        // Set the same camera for the utility layer to ensure proper coordinate mapping
-        this._gizmosLayer.utilityLayerScene.activeCamera = this._scene.activeCamera;
-        
-        // Ensure the utility layer uses the same viewport as the main scene
-        this._gizmosLayer.utilityLayerScene.autoClear = false;
-        
-        // Force the utility layer to use the same viewport as the main scene
-        const mainCamera = this._scene.activeCamera;
-        if (mainCamera) {
-            this._gizmosLayer.utilityLayerScene.activeCamera!.viewport = mainCamera.viewport.clone();
+        // Critical: Share the camera between the main scene and utility layer
+        if (this._scene.activeCamera) {
+            this._gizmosLayer.utilityLayerScene.activeCamera = this._scene.activeCamera;
+            // This is crucial for proper coordinate mapping
+            this._gizmosLayer.utilityLayerScene.cameraToUseForPointers = this._scene.activeCamera;
         }
-        
-        // Ensure the utility layer uses the same engine and canvas
-        this._gizmosLayer.utilityLayerScene.getEngine = () => this._scene!.getEngine();
 
-        // Create gizmos for each VR object
+        // Create initial gizmos (will be updated based on active gizmo type)
+        this._updateGizmoTypes();
+    }
+
+    private _updateGizmoTypes(): void {
+        if (!this._gizmosLayer) return;
+
+        // Dispose existing gizmos
+        this._disposeGizmos();
+
+        // Create new gizmos based on active type
+        const gizmoType = this.state.activeGizmo;
+        
         if (this._headset) {
-            this._headsetGizmo = new PositionGizmo(this._gizmosLayer);
-            this._headsetGizmo.attachedMesh = this.state.showGizmos ? this._headset : null;
-            this._headsetGizmo.scaleRatio = 1.5; // Make gizmos larger for easier interaction
-            this._headsetGizmo.planarGizmoEnabled = true;
-            this._headsetGizmo.updateGizmoRotationToMatchAttachedMesh = false;
-            this._headsetGizmo.updateGizmoPositionToMatchAttachedMesh = true;
-            
-            // Configure gizmo for better interaction
-            this._headsetGizmo.xGizmo.dragBehavior.enabled = true;
-            this._headsetGizmo.yGizmo.dragBehavior.enabled = true;
-            this._headsetGizmo.zGizmo.dragBehavior.enabled = true;
-            
-            // Listen for gizmo drag events
-            this._headsetGizmo.onDragStartObservable.add(() => {
-                console.log("Headset gizmo drag started");
-            });
-            
-            this._headsetGizmo.onDragObservable.add(() => {
-                // WebXR poses will be updated automatically through the existing pose getter methods
-                console.log("Headset position:", this._headset?.position);
-            });
-            
-            this._headsetGizmo.onDragEndObservable.add(() => {
-                console.log("Headset gizmo drag ended");
-            });
+            this._headsetGizmo = this._createGizmoForMesh(this._headset, gizmoType);
         }
-
+        
         if (this._leftController) {
-            this._leftControllerGizmo = new PositionGizmo(this._gizmosLayer);
-            this._leftControllerGizmo.attachedMesh = this.state.showGizmos ? this._leftController : null;
-            this._leftControllerGizmo.scaleRatio = 1.5;
-            this._leftControllerGizmo.planarGizmoEnabled = true;
-            this._leftControllerGizmo.updateGizmoRotationToMatchAttachedMesh = false;
-            this._leftControllerGizmo.updateGizmoPositionToMatchAttachedMesh = true;
-            
-            // Configure gizmo for better interaction
-            this._leftControllerGizmo.xGizmo.dragBehavior.enabled = true;
-            this._leftControllerGizmo.yGizmo.dragBehavior.enabled = true;
-            this._leftControllerGizmo.zGizmo.dragBehavior.enabled = true;
-            
-            this._leftControllerGizmo.onDragStartObservable.add(() => {
-                console.log("Left controller gizmo drag started");
-            });
-            
-            this._leftControllerGizmo.onDragObservable.add(() => {
-                console.log("Left controller position:", this._leftController?.position);
-            });
-            
-            this._leftControllerGizmo.onDragEndObservable.add(() => {
-                console.log("Left controller gizmo drag ended");
-            });
+            this._leftControllerGizmo = this._createGizmoForMesh(this._leftController, gizmoType);
         }
-
+        
         if (this._rightController) {
-            this._rightControllerGizmo = new PositionGizmo(this._gizmosLayer);
-            this._rightControllerGizmo.attachedMesh = this.state.showGizmos ? this._rightController : null;
-            this._rightControllerGizmo.scaleRatio = 1.5;
-            this._rightControllerGizmo.planarGizmoEnabled = true;
-            this._rightControllerGizmo.updateGizmoRotationToMatchAttachedMesh = false;
-            this._rightControllerGizmo.updateGizmoPositionToMatchAttachedMesh = true;
-            
-            // Configure gizmo for better interaction
-            this._rightControllerGizmo.xGizmo.dragBehavior.enabled = true;
-            this._rightControllerGizmo.yGizmo.dragBehavior.enabled = true;
-            this._rightControllerGizmo.zGizmo.dragBehavior.enabled = true;
-            
-            this._rightControllerGizmo.onDragStartObservable.add(() => {
-                console.log("Right controller gizmo drag started");
-            });
-            
-            this._rightControllerGizmo.onDragObservable.add(() => {
-                console.log("Right controller position:", this._rightController?.position);
-            });
-            
-            this._rightControllerGizmo.onDragEndObservable.add(() => {
-                console.log("Right controller gizmo drag ended");
-            });
+            this._rightControllerGizmo = this._createGizmoForMesh(this._rightController, gizmoType);
         }
 
-        // Set initial gizmo visibility based on state
-        if (!this.state.showGizmos) {
-            this._hideGizmos();
+        // Update visibility based on selected mesh
+        if (this._selectedMesh) {
+            this._updateGizmosForMesh(this._selectedMesh);
         }
+    }
+
+    private _createGizmoForMesh(_mesh: AbstractMesh, gizmoType: "none" | "position" | "rotation" | "scaling"): PositionGizmo | RotationGizmo | ScaleGizmo | null {
+        if (!this._gizmosLayer || gizmoType === "none") {
+            return null;
+        }
+
+        let gizmo: PositionGizmo | RotationGizmo | ScaleGizmo;
+        
+        switch (gizmoType) {
+            case "position":
+                gizmo = new PositionGizmo(this._gizmosLayer);
+                break;
+            case "rotation":
+                gizmo = new RotationGizmo(this._gizmosLayer);
+                break;
+            case "scaling":
+                gizmo = new ScaleGizmo(this._gizmosLayer);
+                break;
+            default:
+                return null;
+        }
+
+        // Configure gizmo
+        gizmo.scaleRatio = 2;
+        if (gizmo instanceof PositionGizmo) {
+            gizmo.planarGizmoEnabled = true;
+        }
+        
+        // Configure gizmo for better interaction
+        gizmo.updateGizmoRotationToMatchAttachedMesh = false;
+        gizmo.updateGizmoPositionToMatchAttachedMesh = true;
+        
+        // Add drag event handlers for better interaction
+        gizmo.onDragStartObservable.add(() => {
+            // Detach camera control during gizmo drag
+            if (this._scene && this._scene.activeCamera) {
+                this._scene.activeCamera.detachControl();
+            }
+        });
+        
+        gizmo.onDragEndObservable.add(() => {
+            // Re-attach camera control after gizmo drag
+            if (this._scene && this._scene.activeCamera) {
+                const canvas = this._engine?.getRenderingCanvas();
+                if (canvas) {
+                    this._scene.activeCamera.attachControl(canvas, true);
+                }
+            }
+        });
+
+        return gizmo;
     }
 
     private _disposeGizmos(): void {
