@@ -1,6 +1,9 @@
 import { extname, join, dirname } from "path/posix";
 
 import sharp from "sharp";
+import { readJSON } from "fs-extra";
+import "babylonjs-procedural-textures";
+import { UniqueNumber } from "../../../../tools/tools";
 
 import { Component, DragEvent, PropsWithChildren, ReactNode } from "react";
 
@@ -30,6 +33,9 @@ import { EditorInspectorNumberField } from "./number";
 import { EditorInspectorSwitchField } from "./switch";
 import { EditorInspectorSectionField } from "./section";
 
+import { ProceduralTextureThumbnailRenderer } from "../../assets-browser/renderers/procedural-texture-thumbnail";
+import { isProceduralTexture, getProceduralTextureType } from "./procedural-texture";
+
 export interface IEditorInspectorTextureFieldProps extends PropsWithChildren {
 	title: string;
 	property: string;
@@ -51,7 +57,31 @@ export interface IEditorInspectorTextureFieldState {
 	previewTemporaryUrl: string | null;
 }
 
+const TEXTURE_WIDTH = 128;
+const TEXTURE_HEIGHT = 128;
+
+const WRAP_MODE_ITEMS = [
+	{ text: "Wrap", value: Texture.WRAP_ADDRESSMODE },
+	{ text: "Clamp", value: Texture.CLAMP_ADDRESSMODE },
+	{ text: "Mirror", value: Texture.MIRROR_ADDRESSMODE },
+];
+
+const COORDINATES_MODE_ITEMS = [
+
+	{ text: "Explicit", value: Texture.EXPLICIT_MODE },
+	{ text: "Spherical", value: Texture.SPHERICAL_MODE },
+	{ text: "Planar", value: Texture.PLANAR_MODE },
+	{ text: "Cubic", value: Texture.CUBIC_MODE },
+	{ text: "Projection", value: Texture.PROJECTION_MODE },
+	{ text: "Skybox", value: Texture.SKYBOX_MODE },
+	{ text: "Inversed Cubic", value: Texture.INVCUBIC_MODE },
+	{ text: "Equirectangular", value: Texture.EQUIRECTANGULAR_MODE },
+	{ text: "Fixed Equirectangular", value: Texture.FIXED_EQUIRECTANGULAR_MODE },
+	{ text: "Equirectangular Mirrored", value: Texture.FIXED_EQUIRECTANGULAR_MIRRORED_MODE },
+];
+
 export class EditorInspectorTextureField extends Component<IEditorInspectorTextureFieldProps, IEditorInspectorTextureFieldState> {
+
 	public constructor(props: IEditorInspectorTextureFieldProps) {
 		super(props);
 
@@ -61,6 +91,15 @@ export class EditorInspectorTextureField extends Component<IEditorInspectorTextu
 		};
 
 		this._computeTemporaryPreview();
+	}
+
+	public componentDidUpdate(prevProps: IEditorInspectorTextureFieldProps): void {
+		const prevTexture = prevProps.object[prevProps.property];
+		const currentTexture = this.props.object[this.props.property];
+
+		if (prevTexture !== currentTexture) {
+			this._computeTemporaryPreview();
+		}
 	}
 
 	public render(): ReactNode {
@@ -107,16 +146,26 @@ export class EditorInspectorTextureField extends Component<IEditorInspectorTextu
 												onFinishChange={() => this.props.onChange?.(texture)}
 											/>
 										)}
-										<EditorInspectorSwitchField
-											noUndoRedo={this.props.noUndoRedo}
-											label="Invert Y"
-											object={texture}
-											property="_invertY"
-											onChange={() => {
-												this._handleReloadTexture(texture);
-												this.props.onChange?.(texture);
-											}}
-										/>
+										{/* Only show Invert Y for non-procedural textures */}
+										{(() => {
+											const isProcedural = isProceduralTexture(texture);
+
+											if (!isProcedural) {
+												return (
+													<EditorInspectorSwitchField
+														noUndoRedo={this.props.noUndoRedo}
+														label="Invert Y"
+														object={texture}
+														property="_invertY"
+														onChange={() => {
+															this._handleReloadTexture(texture);
+															this.props.onChange?.(texture);
+														}}
+													/>
+												);
+											}
+											return null;
+										})()}
 									</>
 								)}
 
@@ -173,6 +222,10 @@ export class EditorInspectorTextureField extends Component<IEditorInspectorTextu
 	}
 
 	private _handleReloadTexture(texture: Texture | CubeTexture): void {
+		if (isProceduralTexture(texture)) {
+			return;
+		}
+
 		if (!projectConfiguration.path || !texture.url) {
 			return;
 		}
@@ -185,18 +238,23 @@ export class EditorInspectorTextureField extends Component<IEditorInspectorTextu
 	}
 
 	private _getPreviewComponent(textureUrl: false | string | null): ReactNode {
+		const texture = this.props.object[this.props.property];
+		const isProcedural = texture && isProceduralTexture(texture);
+
 		return (
-			<div className={`flex justify-center items-center ${textureUrl ? "w-24 h-24" : "w-8 h-8"} aspect-square`}>
-				{textureUrl && (
+			<div className={`flex justify-center items-center ${textureUrl || isProcedural ? "w-24 h-24" : "w-8 h-8"} aspect-square`}>
+				{(textureUrl || isProcedural) && (
 					<Popover>
 						<PopoverTrigger>
 							<>
-								{isCubeTexture(this.props.object[this.props.property]) ? (
+								{isCubeTexture(texture) ? (
 									<SiDotenv className="w-24 h-24" />
-								) : isColorGradingTexture(this.props.object[this.props.property]) ? (
+								) : isColorGradingTexture(texture) ? (
 									<IoIosColorPalette className="w-24 h-24" />
-								) : extname(textureUrl).toLowerCase() === ".exr" ? (
+								) : extname(textureUrl || "").toLowerCase() === ".exr" ? (
 									<EXRIcon size="96px" />
+								) : isProcedural ? (
+									<ProceduralTextureThumbnailRenderer absolutePath={texture.url ? join(dirname(projectConfiguration.path!), texture.url) : ""} />
 								) : this.state.previewTemporaryUrl ? (
 									<img className="w-24 h-24 object-contain" src={this.state.previewTemporaryUrl} />
 								) : (
@@ -206,9 +264,9 @@ export class EditorInspectorTextureField extends Component<IEditorInspectorTextu
 						</PopoverTrigger>
 						<PopoverContent side="left">
 							<>
-								{isCubeTexture(this.props.object[this.props.property])
+								{isCubeTexture(texture)
 									? this._getCubeTextureInspector()
-									: isColorGradingTexture(this.props.object[this.props.property])
+									: isColorGradingTexture(texture)
 										? this._getColorGradingTextureInspector()
 										: this._getTextureInspector()}
 							</>
@@ -216,7 +274,7 @@ export class EditorInspectorTextureField extends Component<IEditorInspectorTextu
 					</Popover>
 				)}
 
-				{!textureUrl && <MdOutlineQuestionMark className="w-8 h-8" />}
+				{!textureUrl && !isProcedural && <MdOutlineQuestionMark className="w-8 h-8" />}
 			</div>
 		);
 	}
@@ -247,13 +305,17 @@ export class EditorInspectorTextureField extends Component<IEditorInspectorTextu
 
 				<EditorInspectorSectionField title="Coordinates">
 					<EditorInspectorNumberField
+						noUndoRedo={this.props.noUndoRedo}
 						label="Index"
 						object={texture}
 						property="coordinatesIndex"
 						step={1}
 						min={0}
 						onChange={(v) => (texture.coordinatesIndex = Math.round(v))}
-						onFinishChange={() => this.props.onChange?.(texture)}
+						onFinishChange={() => {
+							this.forceUpdate();
+							this.props.onChange?.(texture);
+						}}
 					/>
 
 					<EditorInspectorListField
@@ -265,18 +327,7 @@ export class EditorInspectorTextureField extends Component<IEditorInspectorTextu
 							this.forceUpdate();
 							this.props.onChange?.(texture);
 						}}
-						items={[
-							{ text: "Explicit", value: Texture.EXPLICIT_MODE },
-							{ text: "Spherical", value: Texture.SPHERICAL_MODE },
-							{ text: "Planar", value: Texture.PLANAR_MODE },
-							{ text: "Cubic", value: Texture.CUBIC_MODE },
-							{ text: "Projection", value: Texture.PROJECTION_MODE },
-							{ text: "Skybox", value: Texture.SKYBOX_MODE },
-							{ text: "Inversed Cubic", value: Texture.INVCUBIC_MODE },
-							{ text: "Equirectangular", value: Texture.EQUIRECTANGULAR_MODE },
-							{ text: "Fixed Equirectangular", value: Texture.FIXED_EQUIRECTANGULAR_MODE },
-							{ text: "Equirectangular Mirrored", value: Texture.FIXED_EQUIRECTANGULAR_MIRRORED_MODE },
-						]}
+						items={COORDINATES_MODE_ITEMS}
 					/>
 				</EditorInspectorSectionField>
 			</div>
@@ -313,8 +364,17 @@ export class EditorInspectorTextureField extends Component<IEditorInspectorTextu
 			return;
 		}
 
+		if (isProceduralTexture(texture)) {
+			return this._getProceduralTextureInspector(texture);
+		}
+
 		const o = {
 			samplingMode: texture.samplingMode,
+		};
+
+		const onChange = () => {
+			this.forceUpdate();
+			this.props.onChange?.(texture);
 		};
 
 		return (
@@ -359,36 +419,22 @@ export class EditorInspectorTextureField extends Component<IEditorInspectorTextu
 						label="U Scale"
 						object={texture}
 						property="uScale"
-						onChange={() => this.forceUpdate()}
-						onFinishChange={() => this.props.onChange?.(texture)}
+						onChange={() => onChange()}
+						onFinishChange={() => onChange()}
 					/>
 					<EditorInspectorNumberField
 						noUndoRedo={this.props.noUndoRedo}
 						label="V Scale"
 						object={texture}
 						property="vScale"
-						onChange={() => this.forceUpdate()}
-						onFinishChange={() => this.props.onChange?.(texture)}
+						onChange={() => onChange()}
+						onFinishChange={() => onChange()}
 					/>
 				</EditorInspectorSectionField>
-
 				<EditorInspectorSectionField title="Offset">
-					<EditorInspectorNumberField
-						noUndoRedo={this.props.noUndoRedo}
-						label="U Offset"
-						object={texture}
-						property="uOffset"
-						onFinishChange={() => this.props.onChange?.(texture)}
-					/>
-					<EditorInspectorNumberField
-						noUndoRedo={this.props.noUndoRedo}
-						label="V Offset"
-						object={texture}
-						property="vOffset"
-						onFinishChange={() => this.props.onChange?.(texture)}
-					/>
+					<EditorInspectorNumberField noUndoRedo={this.props.noUndoRedo} label="U Offset" object={texture} property="uOffset" onFinishChange={() => onChange()} />
+					<EditorInspectorNumberField noUndoRedo={this.props.noUndoRedo} label="V Offset" object={texture} property="vOffset" onFinishChange={() => onChange()} />
 				</EditorInspectorSectionField>
-
 				<EditorInspectorSectionField title="Coordinates">
 					<EditorInspectorNumberField
 						noUndoRedo={this.props.noUndoRedo}
@@ -398,29 +444,15 @@ export class EditorInspectorTextureField extends Component<IEditorInspectorTextu
 						step={1}
 						min={0}
 						onChange={(v) => (texture.coordinatesIndex = Math.round(v))}
-						onFinishChange={() => this.props.onChange?.(texture)}
+						onFinishChange={() => onChange()}
 					/>
 					<EditorInspectorListField
 						noUndoRedo={this.props.noUndoRedo}
 						label="Mode"
 						object={texture}
 						property="coordinatesMode"
-						onChange={() => {
-							this.forceUpdate();
-							this.props.onChange?.(texture);
-						}}
-						items={[
-							{ text: "Explicit", value: Texture.EXPLICIT_MODE },
-							{ text: "Spherical", value: Texture.SPHERICAL_MODE },
-							{ text: "Planar", value: Texture.PLANAR_MODE },
-							{ text: "Cubic", value: Texture.CUBIC_MODE },
-							{ text: "Projection", value: Texture.PROJECTION_MODE },
-							{ text: "Skybox", value: Texture.SKYBOX_MODE },
-							{ text: "Inversed Cubic", value: Texture.INVCUBIC_MODE },
-							{ text: "Equirectangular", value: Texture.EQUIRECTANGULAR_MODE },
-							{ text: "Fixed Equirectangular", value: Texture.FIXED_EQUIRECTANGULAR_MODE },
-							{ text: "Equirectangular Mirrored", value: Texture.FIXED_EQUIRECTANGULAR_MIRRORED_MODE },
-						]}
+						onChange={() => onChange()}
+						items={COORDINATES_MODE_ITEMS}
 					/>
 				</EditorInspectorSectionField>
 
@@ -449,36 +481,112 @@ export class EditorInspectorTextureField extends Component<IEditorInspectorTextu
 						label="Wrap U"
 						object={texture}
 						property="wrapU"
-						onChange={() => this.props.onChange?.(texture)}
-						items={[
-							{ text: "Wrap", value: Texture.WRAP_ADDRESSMODE },
-							{ text: "Clamp", value: Texture.CLAMP_ADDRESSMODE },
-							{ text: "Mirror", value: Texture.MIRROR_ADDRESSMODE },
-						]}
+						onChange={() => onChange()}
+						items={WRAP_MODE_ITEMS}
 					/>
 					<EditorInspectorListField
 						noUndoRedo={this.props.noUndoRedo}
 						label="Wrap V"
 						object={texture}
 						property="wrapV"
-						onChange={() => this.props.onChange?.(texture)}
-						items={[
-							{ text: "Wrap", value: Texture.WRAP_ADDRESSMODE },
-							{ text: "Clamp", value: Texture.CLAMP_ADDRESSMODE },
-							{ text: "Mirror", value: Texture.MIRROR_ADDRESSMODE },
-						]}
+						onChange={() => onChange()}
+						items={WRAP_MODE_ITEMS}
 					/>
 					<EditorInspectorListField
 						noUndoRedo={this.props.noUndoRedo}
 						label="Wrap R"
 						object={texture}
 						property="wrapR"
+						onChange={() => onChange()}
+						items={WRAP_MODE_ITEMS}
+					/>
+				</EditorInspectorSectionField>
+			</div>
+		);
+	}
+
+	private _getProceduralTextureInspector(texture: any): ReactNode {
+		const textureType = getProceduralTextureType(texture);
+		const onChange = () => {
+			this.forceUpdate();
+			this.props.onChange?.(texture);
+		};
+
+		return (
+			<div className="flex flex-col gap-2 h-full">
+				<EditorInspectorSectionField title="Common">
+					<div className="flex justify-between items-center px-2 py-2">
+						<div className="w-1/2">Dimensions</div>
+						<div className="text-white/50 w-full text-end">
+							{texture.getSize().width}x{texture.getSize().height}
+						</div>
+					</div>
+					<div className="flex justify-between items-center px-2 py-2">
+						<div className="w-1/2">Type</div>
+						<div className="text-white/50 w-full text-end">{textureType}</div>
+					</div>
+					<EditorInspectorSwitchField
+						noUndoRedo={this.props.noUndoRedo}
+						label="Gamma Space"
+						object={texture}
+						property="gammaSpace"
 						onChange={() => this.props.onChange?.(texture)}
-						items={[
-							{ text: "Wrap", value: Texture.WRAP_ADDRESSMODE },
-							{ text: "Clamp", value: Texture.CLAMP_ADDRESSMODE },
-							{ text: "Mirror", value: Texture.MIRROR_ADDRESSMODE },
-						]}
+					/>
+					<EditorInspectorSwitchField
+						noUndoRedo={this.props.noUndoRedo}
+						label="Get Alpha From RGB"
+						object={texture}
+						property="getAlphaFromRGB"
+						onChange={() => this.props.onChange?.(texture)}
+					/>
+				</EditorInspectorSectionField>
+
+				<EditorInspectorSectionField title="Scale">
+					<EditorInspectorNumberField
+						noUndoRedo={this.props.noUndoRedo}
+						label="U Scale"
+						object={texture}
+						property="uScale"
+						onChange={() => onChange()}
+						onFinishChange={() => onChange()}
+					/>
+					<EditorInspectorNumberField
+						noUndoRedo={this.props.noUndoRedo}
+						label="V Scale"
+						object={texture}
+						property="vScale"
+						onChange={() => onChange()}
+						onFinishChange={() => onChange()}
+					/>
+				</EditorInspectorSectionField>
+				<EditorInspectorSectionField title="Offset">
+					<EditorInspectorNumberField noUndoRedo={this.props.noUndoRedo} label="U Offset" object={texture} property="uOffset" onFinishChange={() => onChange()} />
+					<EditorInspectorNumberField noUndoRedo={this.props.noUndoRedo} label="V Offset" object={texture} property="vOffset" onFinishChange={() => onChange()} />
+				</EditorInspectorSectionField>
+				<EditorInspectorSectionField title="Wrap">
+					<EditorInspectorListField
+						noUndoRedo={this.props.noUndoRedo}
+						label="Wrap U"
+						object={texture}
+						property="wrapU"
+						onChange={() => onChange()}
+						items={WRAP_MODE_ITEMS}
+					/>
+					<EditorInspectorListField
+						noUndoRedo={this.props.noUndoRedo}
+						label="Wrap V"
+						object={texture}
+						property="wrapV"
+						onChange={() => onChange()}
+						items={WRAP_MODE_ITEMS}
+					/>
+					<EditorInspectorListField
+						noUndoRedo={this.props.noUndoRedo}
+						label="Wrap R"
+						object={texture}
+						property="wrapR"
+						onChange={() => onChange()}
+						items={WRAP_MODE_ITEMS}
 					/>
 				</EditorInspectorSectionField>
 			</div>
@@ -487,21 +595,32 @@ export class EditorInspectorTextureField extends Component<IEditorInspectorTextu
 
 	private async _computeTemporaryPreview(): Promise<void> {
 		const texture = this.props.object[this.props.property] as Texture;
-		if (!isTexture(texture) || !texture.url || extname(texture.url).toLowerCase() === ".exr") {
+		if (!isTexture(texture)) {
 			return;
 		}
 
-		const path = join(dirname(projectConfiguration.path!), texture.url);
-
-		const buffer = await sharp(path).resize(128, 128).toBuffer();
-
-		if (this.state.previewTemporaryUrl) {
-			URL.revokeObjectURL(this.state.previewTemporaryUrl);
+		if (isProceduralTexture(texture)) {
+			return;
 		}
 
-		this.setState({
-			previewTemporaryUrl: URL.createObjectURL(new Blob([buffer])),
-		});
+		if (!texture.url || extname(texture.url).toLowerCase() === ".exr") {
+			return;
+		}
+
+		try {
+			const path = join(dirname(projectConfiguration.path!), texture.url);
+			const buffer = await sharp(path).resize(TEXTURE_WIDTH, TEXTURE_HEIGHT).toBuffer();
+
+			if (this.state.previewTemporaryUrl) {
+				URL.revokeObjectURL(this.state.previewTemporaryUrl);
+			}
+
+			this.setState({
+				previewTemporaryUrl: URL.createObjectURL(new Blob([buffer])),
+			});
+		} catch (error) {
+			console.warn("Failed to generate texture preview:", error);
+		}
 	}
 
 	private _handleDragOver(ev: DragEvent<HTMLDivElement>): void {
@@ -514,7 +633,7 @@ export class EditorInspectorTextureField extends Component<IEditorInspectorTextu
 		this.setState({ dragOver: false });
 	}
 
-	private _handleDrop(ev: DragEvent<HTMLDivElement>): void {
+	private async _handleDrop(ev: DragEvent<HTMLDivElement>): Promise<void> {
 		ev.preventDefault();
 		this.setState({ dragOver: false });
 
@@ -528,28 +647,30 @@ export class EditorInspectorTextureField extends Component<IEditorInspectorTextu
 			case ".jpeg":
 			case ".bmp":
 			case ".exr":
-				const oldTexture = this.props.object[this.props.property];
-				const newTexture = configureImportedTexture(
-					new Texture(absolutePath, this.props.scene ?? (isScene(this.props.object) ? this.props.object : this.props.object.getScene()))
-				);
+				{
+					const oldTexture = this.props.object[this.props.property];
+					const newTexture = configureImportedTexture(
+						new Texture(absolutePath, this.props.scene ?? (isScene(this.props.object) ? this.props.object : this.props.object.getScene()))
+					);
 
-				if (oldTexture !== newTexture) {
-					this.props.object[this.props.property] = newTexture;
-					this.props.onChange?.(newTexture);
+					if (oldTexture !== newTexture) {
+						this.props.object[this.props.property] = newTexture;
+						this.props.onChange?.(newTexture);
 
-					if (!this.props.noUndoRedo) {
-						registerUndoRedo({
-							executeRedo: true,
-							undo: () => (this.props.object[this.props.property] = oldTexture),
-							redo: () => (this.props.object[this.props.property] = newTexture),
-							onLost: () => newTexture?.dispose(),
-						});
+						if (!this.props.noUndoRedo) {
+							registerUndoRedo({
+								executeRedo: true,
+								undo: () => (this.props.object[this.props.property] = oldTexture),
+								redo: () => (this.props.object[this.props.property] = newTexture),
+								onLost: () => newTexture?.dispose(),
+							});
+						}
+
+						onTextureAddedObservable.notifyObservers(newTexture);
 					}
 
-					onTextureAddedObservable.notifyObservers(newTexture);
+					this._computeTemporaryPreview();
 				}
-
-				this._computeTemporaryPreview();
 				break;
 
 			case ".3dl":
@@ -610,6 +731,64 @@ export class EditorInspectorTextureField extends Component<IEditorInspectorTextu
 							},
 							onLost: () => newTexture?.dispose(),
 						});
+					}
+				}
+				break;
+
+			case ".proceduraltexture":
+				{
+					let config: any = {};
+					try {
+						config = await readJSON(absolutePath);
+					} catch (e) {
+						config = {};
+					}
+
+					const scene = this.props.scene ?? (isScene(this.props.object) ? this.props.object : this.props.object.getScene());
+					const oldTexture = this.props.object[this.props.property];
+
+					const fileNameWithExt = absolutePath.split("/").pop() || "";
+					const baseName = fileNameWithExt.replace(extname(absolutePath), "");
+					const size = config.size ?? 512;
+
+					// Get the correct procedural texture class based on config
+					const textureType = config.customType || "BABYLON.PerlinNoiseProceduralTexture";
+					const className = textureType.split(".").pop(); // Extract class name from "BABYLON.ClassName"
+
+					// Import procedural textures module
+					const proceduralTextures = await import("babylonjs-procedural-textures");
+					const ProceduralTextureClass = (proceduralTextures as any)[className];
+
+					if (!ProceduralTextureClass) {
+						console.warn(`${className} class not found in babylonjs-procedural-textures.`);
+						break;
+					}
+
+					const newTexture = new ProceduralTextureClass(baseName, size, scene) as Texture;
+
+					newTexture.uniqueId = UniqueNumber.Get();
+
+					const projectDir = join(dirname(projectConfiguration.path!), "/");
+					const relativePath = absolutePath.replace(projectDir, "");
+					newTexture.name = relativePath;
+					newTexture.url = relativePath;
+
+					if (oldTexture !== newTexture) {
+						this.props.object[this.props.property] = newTexture;
+						this.props.onChange?.(newTexture);
+
+						if (!this.props.noUndoRedo) {
+							registerUndoRedo({
+								executeRedo: true,
+								undo: () => (this.props.object[this.props.property] = oldTexture),
+								redo: () => (this.props.object[this.props.property] = newTexture),
+								onLost: () => newTexture?.dispose(),
+							});
+						}
+
+						onTextureAddedObservable.notifyObservers(newTexture);
+
+						(newTexture as any)._proceduralTextureType = className;
 					}
 				}
 				break;

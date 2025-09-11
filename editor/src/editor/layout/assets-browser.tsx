@@ -71,6 +71,7 @@ import { AssetBrowserImageItem } from "./assets-browser/items/image-item";
 import { AssetBrowserMaterialItem } from "./assets-browser/items/material-item";
 import { AssetBrowserCinematicItem } from "./assets-browser/items/cinematic-item";
 import { AssetsBrowserItem, IAssetsBrowserItemProps } from "./assets-browser/items/item";
+import { AssetBrowserProceduralTextureItem } from "./assets-browser/items/procedural-texture-item";
 
 import { listenGuiAssetsEvents } from "./assets-browser/events/gui";
 import { listenSceneAssetsEvents } from "./assets-browser/events/scene";
@@ -91,6 +92,7 @@ const ImageSelectable = createSelectable(AssetBrowserImageItem);
 const SceneSelectable = createSelectable(AssetBrowserSceneItem);
 const MaterialSelectable = createSelectable(AssetBrowserMaterialItem);
 const CinematicSelectable = createSelectable(AssetBrowserCinematicItem);
+const ProceduralSelectable = createSelectable(AssetBrowserProceduralTextureItem);
 
 export interface IEditorAssetsBrowserProps {
 	/**
@@ -750,6 +752,22 @@ export class EditorAssetsBrowser extends Component<IEditorAssetsBrowserProps, IE
 								<ContextMenuSeparator />
 								<ContextMenuItem onClick={() => this._handleAddFullScreenGUI()}>Full Screen GUI</ContextMenuItem>
 
+								<ContextMenuSeparator />
+								<ContextMenuSub>
+									<ContextMenuSubTrigger className="flex items-center gap-2">Procedural Texture</ContextMenuSubTrigger>
+									<ContextMenuSubContent>
+										<ContextMenuItem onClick={() => this._handleAddProceduralTexture("BrickProceduralTexture")}>Brick</ContextMenuItem>
+										<ContextMenuItem onClick={() => this._handleAddProceduralTexture("CloudProceduralTexture")}>Cloud</ContextMenuItem>
+										<ContextMenuItem onClick={() => this._handleAddProceduralTexture("FireProceduralTexture")}>Fire</ContextMenuItem>
+										<ContextMenuItem onClick={() => this._handleAddProceduralTexture("GrassProceduralTexture")}>Grass</ContextMenuItem>
+										<ContextMenuItem onClick={() => this._handleAddProceduralTexture("MarbleProceduralTexture")}>Marble</ContextMenuItem>
+										<ContextMenuItem onClick={() => this._handleAddProceduralTexture("PerlinNoiseProceduralTexture")}>Perlin Noise</ContextMenuItem>
+										<ContextMenuItem onClick={() => this._handleAddProceduralTexture("RoadProceduralTexture")}>Road</ContextMenuItem>
+										<ContextMenuItem onClick={() => this._handleAddProceduralTexture("StarfieldProceduralTexture")}>Starfield</ContextMenuItem>
+										<ContextMenuItem onClick={() => this._handleAddProceduralTexture("WoodProceduralTexture")}>Wood</ContextMenuItem>
+									</ContextMenuSubContent>
+								</ContextMenuSub>
+
 								{this.state.browsedPath?.startsWith(join(dirname(projectConfiguration.path!), "/src")) && (
 									<>
 										<ContextMenuSeparator />
@@ -828,6 +846,9 @@ export class EditorAssetsBrowser extends Component<IEditorAssetsBrowserProps, IE
 
 			case ".cinematic":
 				return <CinematicSelectable {...props} />;
+
+			case ".proceduraltexture":
+				return <ProceduralSelectable {...props} />;
 
 			default:
 				return <DefaultSelectable {...props} />;
@@ -1059,6 +1080,32 @@ export class EditorAssetsBrowser extends Component<IEditorAssetsBrowserProps, IE
 		return this._refreshItems(this.state.browsedPath);
 	}
 
+	private async _handleAddProceduralTexture(type: string): Promise<void> {
+		if (!this.state.browsedPath) {
+			return;
+		}
+
+		const displayName = type
+			.replace("ProceduralTexture", "")
+			.replace(/([A-Z])/g, " $1")
+			.trim();
+		const name = await findAvailableFilename(this.state.browsedPath, `New ${displayName}`, ".proceduraltexture");
+		const absolutePath = join(this.state.browsedPath, name);
+
+		const data = {
+			customType: `BABYLON.${type}`,
+			name: name.replace(".proceduraltexture", ""),
+			size: 512,
+		};
+
+		await writeJSON(absolutePath, data, {
+			spaces: "\t",
+			encoding: "utf-8",
+		});
+
+		return this._refreshItems(this.state.browsedPath);
+	}
+
 	/**
 	 * Returns whether the browsed path is the project root path.
 	 * @returns Whether the browsed path is the project root path.
@@ -1159,6 +1206,9 @@ export class EditorAssetsBrowser extends Component<IEditorAssetsBrowserProps, IE
 			case ".mp3":
 			case ".wav":
 			case ".wave":
+				return this.props.editor.layout.inspector.setEditedObject(new FileInspectorObject(item.props.absolutePath));
+
+			case ".proceduraltexture":
 				return this.props.editor.layout.inspector.setEditedObject(new FileInspectorObject(item.props.absolutePath));
 
 			case ".glb":
