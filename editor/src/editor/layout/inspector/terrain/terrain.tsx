@@ -13,6 +13,7 @@ import { CustomMetadataInspector } from "../metadata/custom-metadata";
 
 import { IEditorInspectorImplementationProps } from "../inspector";
 import { TerrainPropertiesInspector } from "./properties";
+import { TerrainSculptingInspector } from "./sculpting";
 
 export class EditorTerrainInspector extends Component<IEditorInspectorImplementationProps<TerrainMesh>> {
 	/**
@@ -64,6 +65,8 @@ export class EditorTerrainInspector extends Component<IEditorInspectorImplementa
 				</EditorInspectorSectionField>
 
 				<TerrainPropertiesInspector {...this.props} />
+
+				<TerrainSculptingInspector editor={this.props.editor} object={this.props.object} />
 
 				<ScriptInspectorComponent editor={this.props.editor} object={this.props.object} />
 
