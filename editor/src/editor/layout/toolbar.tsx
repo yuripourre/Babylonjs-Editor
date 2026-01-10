@@ -19,6 +19,7 @@ import { exportProject } from "../../project/export/export";
 import { Editor } from "../main";
 import { getNodeCommands } from "../dialogs/command-palette/node";
 import { getMeshCommands } from "../dialogs/command-palette/mesh";
+import { getTerrainCommands } from "../dialogs/command-palette/terrain";
 import { getLightCommands } from "../dialogs/command-palette/light";
 import { getCameraCommands } from "../dialogs/command-palette/camera";
 import { getSpriteCommands } from "../dialogs/command-palette/sprite";
@@ -31,6 +32,7 @@ export interface IEditorToolbarProps {
 export class EditorToolbar extends Component<IEditorToolbarProps> {
 	private _nodeCommands: ICommandPaletteType[];
 	private _meshCommands: ICommandPaletteType[];
+	private _terrainCommands: ICommandPaletteType[];
 	private _lightCommands: ICommandPaletteType[];
 	private _cameraCommands: ICommandPaletteType[];
 	private _spriteCommands: ICommandPaletteType[];
@@ -43,11 +45,12 @@ export class EditorToolbar extends Component<IEditorToolbarProps> {
 
 		this._nodeCommands = getNodeCommands(this.props.editor);
 		this._meshCommands = getMeshCommands(this.props.editor);
+		this._terrainCommands = getTerrainCommands(this.props.editor);
 		this._lightCommands = getLightCommands(this.props.editor);
 		this._cameraCommands = getCameraCommands(this.props.editor);
 		this._spriteCommands = getSpriteCommands(this.props.editor);
 
-		const commands = [...this._nodeCommands, ...this._meshCommands, ...this._lightCommands, ...this._cameraCommands, ...this._spriteCommands];
+		const commands = [...this._nodeCommands, ...this._meshCommands, ...this._terrainCommands, ...this._lightCommands, ...this._cameraCommands, ...this._spriteCommands];
 
 		commands.forEach((command) => {
 			ipcRenderer.on(`add:${command.ipcRendererChannelKey}`, command.action);

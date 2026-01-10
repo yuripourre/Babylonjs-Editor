@@ -130,3 +130,12 @@ export const spriteCommandItems = {
 		ipcRendererChannelKey: "sprite-map-node",
 	} as CommandItem,
 };
+
+export const terrainCommandItems = {
+	terrain: {
+		text: "Terrain",
+		label: "Add a new terrain to the scene",
+		key: "add-terrain",
+		ipcRendererChannelKey: "terrain",
+	} as CommandItem,
+};

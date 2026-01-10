@@ -18,6 +18,7 @@ import {
 
 import { EditorCamera } from "../../editor/nodes/camera";
 import { CollisionMesh } from "../../editor/nodes/collision";
+import { TerrainMesh } from "../../editor/nodes/terrain";
 
 import { isSceneLinkNode } from "./scene";
 import { isSpriteManagerNode, isSpriteMapNode } from "./sprites";
@@ -46,6 +47,7 @@ export function isMesh(object: any): object is Mesh {
 	switch (object.getClassName?.()) {
 		case "Mesh":
 		case "GroundMesh":
+		case "TerrainMesh":
 			return true;
 	}
 
@@ -211,6 +213,14 @@ export function isLight(object: any): object is Light {
 	}
 
 	return false;
+}
+
+/**
+ * Returns wether or not the given object is a TerrainMesh.
+ * @param object defines the reference to the object to test its class name.
+ */
+export function isTerrain(object: any): object is TerrainMesh {
+	return object?.getClassName?.() === "TerrainMesh" || object instanceof TerrainMesh;
 }
 
 /**

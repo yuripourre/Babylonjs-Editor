@@ -34,6 +34,7 @@ import { Editor } from "../../editor/main";
 
 import { EditorCamera } from "../../editor/nodes/camera";
 import { CollisionMesh } from "../../editor/nodes/collision";
+import { TerrainMesh } from "../../editor/nodes/terrain";
 import { SceneLinkNode } from "../../editor/nodes/scene-link";
 import { SpriteMapNode } from "../../editor/nodes/sprite-map";
 import { SpriteManagerNode } from "../../editor/nodes/sprite-manager";
@@ -62,6 +63,7 @@ import { parsePhysicsAggregate } from "../../tools/physics/serialization/aggrega
 import { isAbstractMesh, isCollisionMesh, isEditorCamera, isMesh } from "../../tools/guards/nodes";
 import { updateAllLights, updatePointLightShadowMapRenderListPredicate } from "../../tools/light/shadows";
 import { configureSimultaneousLightsForMaterial, normalizeNodeMaterialUniqueIds } from "../../tools/material/material";
+import { loadBlendMapFromPng, loadHeightmapFromPng } from "../../tools/terrain/serialization";
 
 import { createNewSceneDefaultNodes } from "./default";
 import { showLoadSceneProgressDialog } from "./progress";
@@ -118,6 +120,9 @@ export async function loadScene(editor: Editor, projectPath: string, scenePath: 
 	await Promise.all([
 		createDirectoryIfNotExist(join(scenePath, "nodes")),
 		createDirectoryIfNotExist(join(scenePath, "meshes")),
+		createDirectoryIfNotExist(join(scenePath, "terrains")),
+		createDirectoryIfNotExist(join(scenePath, "heightmaps")),
+		createDirectoryIfNotExist(join(scenePath, "blendmaps")),
 		createDirectoryIfNotExist(join(scenePath, "lods")),
 		createDirectoryIfNotExist(join(scenePath, "lights")),
 		createDirectoryIfNotExist(join(scenePath, "cameras")),
@@ -138,6 +143,7 @@ export async function loadScene(editor: Editor, projectPath: string, scenePath: 
 	const [
 		nodesFiles,
 		meshesFiles,
+		terrainFiles,
 		lodsFiles,
 		lightsFiles,
 		cameraFiles,
@@ -154,6 +160,7 @@ export async function loadScene(editor: Editor, projectPath: string, scenePath: 
 	] = await Promise.all([
 		readdir(join(scenePath, "nodes")),
 		readdir(join(scenePath, "meshes")),
+		readdir(join(scenePath, "terrains")).catch(() => []),
 		readdir(join(scenePath, "lods")),
 		readdir(join(scenePath, "lights")),
 		readdir(join(scenePath, "cameras")),
@@ -174,6 +181,7 @@ export async function loadScene(editor: Editor, projectPath: string, scenePath: 
 		100 /
 		(nodesFiles.length +
 			meshesFiles.length +
+			terrainFiles.length +
 			lodsFiles.length +
 			lightsFiles.length +
 			cameraFiles.length +
@@ -463,6 +471,61 @@ export async function loadScene(editor: Editor, projectPath: string, scenePath: 
 					progress.step(progressStep);
 				})
 			);
+		})
+	);
+
+	// Load terrains
+	await Promise.all(
+		terrainFiles.map(async (file) => {
+			if (file.startsWith(".")) {
+				return;
+			}
+
+			try {
+				const data = await readJSON(join(scenePath, "terrains", file), "utf-8");
+
+				// Load heightmap
+				let heightmapData: Float32Array | null = null;
+				if (data.metadata.heightMapPath) {
+					const heightmapPath = join(projectPath, data.metadata.heightMapPath);
+					heightmapData = await loadHeightmapFromPng(heightmapPath, data.metadata);
+				}
+
+				// Create terrain
+				const terrain = new TerrainMesh(data.name, scene, {
+					width: data.metadata.width,
+					depth: data.metadata.depth,
+					subdivisions: data.metadata.subdivisions,
+					minHeight: data.metadata.minHeight,
+					maxHeight: data.metadata.maxHeight,
+					heightmapData: heightmapData,
+				});
+
+				terrain.id = data.id;
+				terrain.uniqueId = data.uniqueId;
+				terrain.metadata = data.metadata;
+				(terrain.metadata as any)._waitingParentId = data.metadata.parentId;
+
+				terrain.position = Vector3.FromArray(data.position);
+				terrain.rotation = Vector3.FromArray(data.rotation);
+				terrain.scaling = Vector3.FromArray(data.scaling);
+
+				// Load blend maps
+				if (data.metadata.blendMapPaths && data.metadata.blendMapPaths.length > 0) {
+					terrain._blendMaps = await Promise.all(
+						data.metadata.blendMapPaths.map(async (path: string) => {
+							const blendMapPath = join(projectPath, path);
+							return await loadBlendMapFromPng(blendMapPath, scene);
+						})
+					);
+				}
+
+				loadResult.meshes.push(terrain);
+			} catch (e: any) {
+				editor.layout.console.error(`Failed to load terrain file "${file}": ${e.message}`);
+			}
+
+			progress.step(progressStep);
 		})
 	);
 

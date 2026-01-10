@@ -22,6 +22,7 @@ import { EditorSceneInspector } from "./inspector/scene/scene";
 
 import { EditorMeshInspector } from "./inspector/mesh/mesh";
 import { EditorTransformNodeInspector } from "./inspector/transform";
+import { EditorTerrainInspector } from "./inspector/terrain/terrain";
 
 import { EditorFileInspector } from "./inspector/file";
 
@@ -66,6 +67,7 @@ export class EditorInspector extends Component<IEditorInspectorProps, IEditorIns
 		IsSupported(object: any): boolean;
 	})[] = [
 		EditorTransformNodeInspector,
+		EditorTerrainInspector,
 		EditorMeshInspector,
 
 		EditorFileInspector,

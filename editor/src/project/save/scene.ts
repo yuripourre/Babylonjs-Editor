@@ -16,7 +16,7 @@ import { isSpriteManagerNode, isSpriteMapNode } from "../../tools/guards/sprites
 import { isGPUParticleSystem, isParticleSystem } from "../../tools/guards/particles";
 import { serializePhysicsAggregate } from "../../tools/physics/serialization/aggregate";
 import { isAnimationGroupFromSceneLink, isFromSceneLink } from "../../tools/scene/scene-link";
-import { isAnyTransformNode, isCollisionMesh, isEditorCamera, isMesh, isTransformNode } from "../../tools/guards/nodes";
+import { isAnyTransformNode, isCollisionMesh, isEditorCamera, isMesh, isTerrain, isTransformNode } from "../../tools/guards/nodes";
 
 import { vlsPostProcessCameraConfigurations } from "../../editor/rendering/vls";
 import { saveRenderingConfigurationForCamera } from "../../editor/rendering/tools";
@@ -30,6 +30,8 @@ import { writeBinaryGeometry } from "../tools/geometry";
 import { writeBinaryMorphTarget } from "../tools/morph-target";
 
 import { showSaveSceneProgressDialog } from "./dialog";
+import { saveBlendMapToPng, saveHeightmapToPng } from "../../tools/terrain/serialization";
+import { TerrainMesh } from "../../editor/nodes/terrain";
 
 export async function saveScene(editor: Editor, projectPath: string, scenePath: string): Promise<void> {
 	const fStat = await stat(scenePath);
@@ -45,6 +47,9 @@ export async function saveScene(editor: Editor, projectPath: string, scenePath: 
 		createDirectoryIfNotExist(join(scenePath, "lods")),
 		createDirectoryIfNotExist(join(scenePath, "nodes")),
 		createDirectoryIfNotExist(join(scenePath, "meshes")),
+		createDirectoryIfNotExist(join(scenePath, "terrains")),
+		createDirectoryIfNotExist(join(scenePath, "heightmaps")),
+		createDirectoryIfNotExist(join(scenePath, "blendmaps")),
 		createDirectoryIfNotExist(join(scenePath, "lights")),
 		createDirectoryIfNotExist(join(scenePath, "cameras")),
 		createDirectoryIfNotExist(join(scenePath, "geometries")),
@@ -70,9 +75,12 @@ export async function saveScene(editor: Editor, projectPath: string, scenePath: 
 		return true;
 	});
 
+	const terrainsToSave = scene.meshes.filter((mesh) => isTerrain(mesh));
+
 	const progressStep =
 		100 /
 		(meshesToSave.length +
+			terrainsToSave.length +
 			scene.transformNodes.length +
 			scene.lights.length +
 			scene.cameras.length +
@@ -260,6 +268,46 @@ export async function saveScene(editor: Editor, projectPath: string, scenePath: 
 		})
 	);
 
+
+	// Write terrains
+	await Promise.all(
+		scene.meshes
+			.filter(mesh => isTerrain(mesh))
+			.map(async (terrain: TerrainMesh) => {
+				const terrainPath = join(scenePath, "terrains", `${terrain.id}.json`);
+				
+				try {
+					const data = terrain.serialize();
+					data.metadata = terrain.metadata;
+					data.metadata.parentId = terrain.parent?.uniqueId;
+					
+					// Save heightmap as PNG
+					if (terrain._heightmapData) {
+						const heightmapPath = join(scenePath, "heightmaps", `${terrain.id}.png`);
+						await saveHeightmapToPng(terrain._heightmapData, heightmapPath, terrain.metadata);
+						data.metadata.heightMapPath = join(relativeScenePath, "heightmaps", `${terrain.id}.png`);
+					}
+					
+					// Save blend maps
+					const blendMapPaths = await Promise.all(
+						terrain._blendMaps.map(async (blendMap, index) => {
+							const blendMapPath = join(scenePath, "blendmaps", `${terrain.id}_blend_${index}.png`);
+							await saveBlendMapToPng(blendMap, blendMapPath);
+							return join(relativeScenePath, "blendmaps", `${terrain.id}_blend_${index}.png`);
+						})
+					);
+					data.metadata.blendMapPaths = blendMapPaths;
+					
+					await writeJSON(terrainPath, data, { spaces: 4 });
+				} catch (e) {
+					editor.layout.console.error(`Failed to write terrain ${terrain.name}: ${e.message}`);
+				} finally {
+					savedFiles.push(terrainPath);
+				}
+				
+				dialog.step(progressStep);
+			})
+	);
 	// Write skeletons
 	await Promise.all(
 		scene.skeletons.map(async (skeleton) => {
