@@ -19,7 +19,6 @@ import {
     Nullable,
     PositionGizmo,
     UtilityLayerRenderer,
-    PointerEventTypes,
 } from "babylonjs";
 
 import { installSimulatedWebXR, ISimulatedGamepad } from "../../tools/webxr/polyfill";
@@ -56,10 +55,6 @@ export class EditorWebXRSimulator extends Component<IEditorWebXRSimulatorProps, 
     private _headset: Nullable<AbstractMesh> = null;
     private _leftController: Nullable<AbstractMesh> = null;
     private _rightController: Nullable<AbstractMesh> = null;
-
-    private _selectedMesh: Nullable<AbstractMesh> = null;
-    private _dragOffset: Vector3 = Vector3.Zero();
-    private _isDragging: boolean = false;
 
     // Gizmos
     private _gizmosLayer: UtilityLayerRenderer | null = null;
@@ -206,7 +201,7 @@ export class EditorWebXRSimulator extends Component<IEditorWebXRSimulatorProps, 
     }
 
     private async _onGotCanvasRef(canvas: HTMLCanvasElement): Promise<void> {
-        if (this._engine) {
+        if (!canvas || this._engine) {
             return;
         }
 
@@ -266,62 +261,6 @@ export class EditorWebXRSimulator extends Component<IEditorWebXRSimulatorProps, 
         // Create gizmos for VR objects
         this._createGizmos();
 
-        // Add scene pointer event handling to prioritize gizmo interactions
-        this._scene.onPointerObservable.add((pointerInfo) => {
-            if (this._scene && this.state.showGizmos) {
-                // Get the canvas element to calculate proper coordinates
-                const canvas = this._scene.getEngine().getRenderingCanvas();
-                if (canvas) {
-                    // Use the scene's built-in coordinate calculation
-                    const x = pointerInfo.event.offsetX;
-                    const y = pointerInfo.event.offsetY;
-                    
-                    console.log("Pointer event:", {
-                        type: pointerInfo.type,
-                        clientX: pointerInfo.event.clientX,
-                        clientY: pointerInfo.event.clientY,
-                        offsetX: pointerInfo.event.offsetX,
-                        offsetY: pointerInfo.event.offsetY,
-                        canvasWidth: canvas.width,
-                        canvasHeight: canvas.height
-                    });
-                    
-                    if (pointerInfo.type === PointerEventTypes.POINTERDOWN) {
-                        // Check both main scene and utility layer for gizmo picks
-                        const mainPickInfo = this._scene.pick(x, y);
-                        const utilityPickInfo = this._gizmosLayer ? this._gizmosLayer.utilityLayerScene.pick(x, y) : null;
-                        
-                        console.log("Pick results:", {
-                            mainPick: mainPickInfo ? { hit: mainPickInfo.hit, meshName: mainPickInfo.pickedMesh?.name } : null,
-                            utilityPick: utilityPickInfo ? { hit: utilityPickInfo.hit, meshName: utilityPickInfo.pickedMesh?.name } : null
-                        });
-                        
-                        const pickInfo = utilityPickInfo && utilityPickInfo.hit ? utilityPickInfo : mainPickInfo;
-                        
-                        if (pickInfo && pickInfo.hit && pickInfo.pickedMesh) {
-                            // Check if we're picking a gizmo
-                            const meshName = pickInfo.pickedMesh.name;
-                            if (meshName.includes("gizmo") || meshName.includes("Gizmo")) {
-                                console.log("Gizmo picked:", meshName, "at coordinates:", x, y);
-                                // Disable camera controls temporarily
-                                if (this._scene.activeCamera) {
-                                    this._scene.activeCamera.detachControl();
-                                }
-                                return;
-                            }
-                        }
-                    } else if (pointerInfo.type === PointerEventTypes.POINTERUP) {
-                        // Re-enable camera controls when pointer is released
-                        if (this._scene.activeCamera) {
-                            this._scene.activeCamera.attachControl(canvas, true);
-                        }
-                    }
-                }
-            }
-        });
-
-        // Simulator always uses single camera - no stereo cameras needed
-
         // Run loop
         this._engine.runRenderLoop(() => {
             if (!this._scene) {
@@ -342,42 +281,6 @@ export class EditorWebXRSimulator extends Component<IEditorWebXRSimulatorProps, 
 
             // Simulator always stays in normal 3D view - no stereo cameras needed
             this._scene.render();
-        });
-
-        // Pointer drag handlers - only for VR objects
-        canvas.addEventListener("pointerdown", (ev: PointerEvent) => {
-            if (!this._scene) {
-                return;
-            }
-            const pick = this._scene.pick(ev.offsetX, ev.offsetY);
-            if (pick && pick.hit && pick.pickedMesh && (pick.pickedMesh === this._headset || pick.pickedMesh === this._leftController || pick.pickedMesh === this._rightController)) {
-                this._selectedMesh = pick.pickedMesh;
-                if (pick.pickedPoint && this._selectedMesh.position) {
-                    this._dragOffset = pick.pickedPoint.subtract(this._selectedMesh.position);
-                }
-                this._isDragging = true;
-                ev.preventDefault(); // Prevent camera controls when dragging objects
-            }
-        });
-
-        canvas.addEventListener("pointermove", (ev: PointerEvent) => {
-            if (!this._isDragging || !this._scene || !this._selectedMesh) {
-                return;
-            }
-            const pick = this._scene.pick(ev.offsetX, ev.offsetY, (m) => m === ground);
-            const finalPick = pick && pick.hit && pick.pickedPoint ? pick : this._scene.pick(ev.offsetX, ev.offsetY);
-            if (finalPick && finalPick.hit && finalPick.pickedPoint) {
-                this._selectedMesh.position = finalPick.pickedPoint.subtract(this._dragOffset);
-            }
-            ev.preventDefault(); // Prevent camera controls when dragging objects
-        });
-
-        canvas.addEventListener("pointerup", (ev: PointerEvent) => {
-            if (this._isDragging) {
-                ev.preventDefault(); // Prevent camera controls when finishing drag
-            }
-            this._isDragging = false;
-            this._selectedMesh = null;
         });
 
         canvas.addEventListener("contextmenu", (e) => {
@@ -669,9 +572,10 @@ export class EditorWebXRSimulator extends Component<IEditorWebXRSimulatorProps, 
         this.forceUpdate();
     }
 
-    private _onPreviewVRChanged = (event: CustomEvent) => {
+    private _onPreviewVRChanged = (event: Event) => {
         // Sync simulator state with preview VR state
-        const isVRActive = event.detail?.active || false;
+        const e = event as CustomEvent;
+        const isVRActive = e.detail?.active || false;
         if (isVRActive !== this.state.previewVR) {
             this.setState({ previewVR: isVRActive });
         }
@@ -752,19 +656,6 @@ export class EditorWebXRSimulator extends Component<IEditorWebXRSimulatorProps, 
             this._headsetGizmo.yGizmo.dragBehavior.enabled = true;
             this._headsetGizmo.zGizmo.dragBehavior.enabled = true;
             
-            // Listen for gizmo drag events
-            this._headsetGizmo.onDragStartObservable.add(() => {
-                console.log("Headset gizmo drag started");
-            });
-            
-            this._headsetGizmo.onDragObservable.add(() => {
-                // WebXR poses will be updated automatically through the existing pose getter methods
-                console.log("Headset position:", this._headset?.position);
-            });
-            
-            this._headsetGizmo.onDragEndObservable.add(() => {
-                console.log("Headset gizmo drag ended");
-            });
         }
 
         if (this._leftController) {
@@ -774,23 +665,11 @@ export class EditorWebXRSimulator extends Component<IEditorWebXRSimulatorProps, 
             this._leftControllerGizmo.planarGizmoEnabled = true;
             this._leftControllerGizmo.updateGizmoRotationToMatchAttachedMesh = false;
             this._leftControllerGizmo.updateGizmoPositionToMatchAttachedMesh = true;
-            
+
             // Configure gizmo for better interaction
             this._leftControllerGizmo.xGizmo.dragBehavior.enabled = true;
             this._leftControllerGizmo.yGizmo.dragBehavior.enabled = true;
             this._leftControllerGizmo.zGizmo.dragBehavior.enabled = true;
-            
-            this._leftControllerGizmo.onDragStartObservable.add(() => {
-                console.log("Left controller gizmo drag started");
-            });
-            
-            this._leftControllerGizmo.onDragObservable.add(() => {
-                console.log("Left controller position:", this._leftController?.position);
-            });
-            
-            this._leftControllerGizmo.onDragEndObservable.add(() => {
-                console.log("Left controller gizmo drag ended");
-            });
         }
 
         if (this._rightController) {
@@ -800,23 +679,11 @@ export class EditorWebXRSimulator extends Component<IEditorWebXRSimulatorProps, 
             this._rightControllerGizmo.planarGizmoEnabled = true;
             this._rightControllerGizmo.updateGizmoRotationToMatchAttachedMesh = false;
             this._rightControllerGizmo.updateGizmoPositionToMatchAttachedMesh = true;
-            
+
             // Configure gizmo for better interaction
             this._rightControllerGizmo.xGizmo.dragBehavior.enabled = true;
             this._rightControllerGizmo.yGizmo.dragBehavior.enabled = true;
             this._rightControllerGizmo.zGizmo.dragBehavior.enabled = true;
-            
-            this._rightControllerGizmo.onDragStartObservable.add(() => {
-                console.log("Right controller gizmo drag started");
-            });
-            
-            this._rightControllerGizmo.onDragObservable.add(() => {
-                console.log("Right controller position:", this._rightController?.position);
-            });
-            
-            this._rightControllerGizmo.onDragEndObservable.add(() => {
-                console.log("Right controller gizmo drag ended");
-            });
         }
 
         // Set initial gizmo visibility based on state

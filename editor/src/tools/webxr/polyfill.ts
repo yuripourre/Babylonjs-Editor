@@ -68,7 +68,8 @@ export function installSimulatedWebXR(callbacks: ISimulatorCallbacks = {}) {
 
                     const requestAnimationFrame = (cb: Function) => {
                         const id = ++rafIdCounter;
-                        const intervalId = setInterval(() => {
+                        const timeoutId = setTimeout(() => {
+                            delete rafIdMap[id];
                             const time = (win.performance && win.performance.now && win.performance.now()) || Date.now();
 
                             const frame: any = {
@@ -116,14 +117,14 @@ export function installSimulatedWebXR(callbacks: ISimulatorCallbacks = {}) {
                             }
                         }, 1000 / 60);
 
-                        rafIdMap[id] = intervalId as any;
+                        rafIdMap[id] = timeoutId as any;
                         return id;
                     };
 
                     const cancelAnimationFrame = (id: number) => {
-                        const intId = rafIdMap[id];
-                        if (intId) {
-                            clearInterval(intId);
+                        const timeoutId = rafIdMap[id];
+                        if (timeoutId) {
+                            clearTimeout(timeoutId);
                             delete rafIdMap[id];
                         }
                     };

@@ -24,6 +24,7 @@ import { getCameraCommands } from "../dialogs/command-palette/camera";
 import { getSpriteCommands } from "../dialogs/command-palette/sprite";
 import { ICommandPaletteType } from "../dialogs/command-palette/command-palette";
 import { EditorMarketplaceBrowser } from "./marketplace";
+import { EditorVRView } from "./vr-view";
 
 export interface IEditorToolbarProps {
 	editor: Editor;
@@ -207,16 +208,19 @@ export class EditorToolbar extends Component<IEditorToolbarProps> {
 					</MenubarMenu>
 
 					{/* View */}
-					{this.props.editor.state.enableExperimentalFeatures && (
-						<MenubarMenu>
-							<MenubarTrigger>Views</MenubarTrigger>
-							<MenubarContent className="border-black/50">
+					<MenubarMenu>
+						<MenubarTrigger>Views</MenubarTrigger>
+						<MenubarContent className="border-black/50">
+							<MenubarCheckboxItem checked={this.props.editor.state.openedTabs.includes("vr")} onClick={() => this._handleToggleVR()}>
+								VR
+							</MenubarCheckboxItem>
+							{this.props.editor.state.enableExperimentalFeatures && (
 								<MenubarCheckboxItem checked={this.props.editor.state.openedTabs.includes("marketplace")} onClick={() => this._handleToggleMarketplace()}>
 									Marketplace
 								</MenubarCheckboxItem>
-							</MenubarContent>
-						</MenubarMenu>
-					)}
+							)}
+						</MenubarContent>
+					</MenubarMenu>
 
 					{/* Window */}
 					<MenubarMenu>
@@ -274,6 +278,20 @@ export class EditorToolbar extends Component<IEditorToolbarProps> {
 
 		const p = await execNodePty(`code "${join(dirname(this.props.editor.state.projectPath), "/")}"`);
 		await p.wait();
+	}
+
+	private _handleToggleVR(): void {
+		if (this.props.editor.state.openedTabs.includes("vr")) {
+			return this.props.editor.layout.removeLayoutTab("vr");
+		}
+
+		this.props.editor.layout.addLayoutTab(<EditorVRView editor={this.props.editor} />, {
+			id: "vr",
+			title: "VR",
+			enableClose: true,
+			setAsActiveTab: true,
+			neighborId: "assets-browser",
+		});
 	}
 
 	private _handleToggleMarketplace(): void {

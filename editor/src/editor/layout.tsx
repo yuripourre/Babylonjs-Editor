@@ -20,6 +20,7 @@ import { EditorAnimation } from "./layout/animation";
 import { EditorAssetsBrowser } from "./layout/assets-browser";
 import { EditorMarketplaceBrowser } from "./layout/marketplace";
 import { EditorWebXRSimulator } from "./layout/webxr-simulator";
+import { EditorVRView } from "./layout/vr-view";
 
 export interface IEditorLayoutProps {
 	/**
@@ -67,6 +68,10 @@ export class EditorLayout extends Component<IEditorLayoutProps> {
 	 * The marketplace browser of the editor.
 	 */
 	public marketplace: EditorMarketplaceBrowser | null;
+	/**
+	 * The VR view panel.
+	 */
+	public vrView: EditorVRView | null = null;
 
 	/**
 	 * Observable for when the layout has changed.
@@ -89,9 +94,10 @@ export class EditorLayout extends Component<IEditorLayoutProps> {
 		animations: <EditorAnimation editor={this.props.editor} ref={(r) => (this.animations = r!)} />,
 		marketplace: <EditorMarketplaceBrowser editor={this.props.editor} ref={(r) => (this.marketplace = r)} />,
 		"webxr-simulator": <EditorWebXRSimulator editor={this.props.editor} ref={(r) => (this.webxrSimulator = r!)} />,
+		vr: <EditorVRView editor={this.props.editor} ref={(r) => (this.vrView = r)} />,
 	};
 
-	private _layoutVersion: string = "5.0.0-alpha.3";
+	private _layoutVersion: string = "5.0.0-alpha.4";
 
 	public constructor(props: IEditorLayoutProps) {
 		super(props);
@@ -156,7 +162,7 @@ export class EditorLayout extends Component<IEditorLayoutProps> {
 
 		localStorage.setItem("babylonjs-editor-layout", JSON.stringify(layoutData));
 
-		const trackableTabs = ["marketplace"];
+		const trackableTabs = ["marketplace", "vr"];
 		const openedTabs = trackableTabs.filter((t) => !!model.getNodeById(t));
 		const prev = this.props.editor.state.openedTabs ?? [];
 		const changed = openedTabs.length !== prev.length || openedTabs.some((t) => !prev.includes(t));

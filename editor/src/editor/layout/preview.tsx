@@ -36,6 +36,7 @@ import {
 	Sprite,
 	Color4,
 	BoundingBox,
+	Viewport,
 } from "babylonjs";
 
 import { Button } from "../../ui/shadcn/ui/button";
@@ -1417,12 +1418,19 @@ export class EditorPreview extends Component<IEditorPreviewProps, IEditorPreview
 			// Notify other components that VR mode is active
 			window.dispatchEvent(new CustomEvent("preview-vr-changed", { detail: { active: true } }));
 
-			// create two cameras for stereo
+			// create two cameras for stereo — inherit rendering properties from the
+			// active editor camera so the sky, far clip, and FOV all match.
 			this._previewXRLeftCamera = new FreeCamera("preview_xr_left", new Vector3(0, 1.6, 0), this.scene);
 			this._previewXRRightCamera = new FreeCamera("preview_xr_right", new Vector3(0, 1.6, 0), this.scene);
 
-			this._previewXRLeftCamera.minZ = 0.01;
-			this._previewXRRightCamera.minZ = 0.01;
+			this._previewXRLeftCamera.minZ = this.camera.minZ;
+			this._previewXRRightCamera.minZ = this.camera.minZ;
+			this._previewXRLeftCamera.maxZ = this.camera.maxZ;
+			this._previewXRRightCamera.maxZ = this.camera.maxZ;
+			this._previewXRLeftCamera.fov = this.camera.fov;
+			this._previewXRRightCamera.fov = this.camera.fov;
+			this._previewXRLeftCamera.layerMask = this.camera.layerMask;
+			this._previewXRRightCamera.layerMask = this.camera.layerMask;
 
 			this._previewXRLeftCamera.viewport = new Viewport(0, 0, 0.5, 1);
 			this._previewXRRightCamera.viewport = new Viewport(0.5, 0, 0.5, 1);
